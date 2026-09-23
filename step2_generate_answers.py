@@ -1,4 +1,4 @@
-﻿"""
+"""
 step2_generate_answers.py - EduBench-Local Pipeline Step 2
 ===========================================================
 For every model in config.MODELS, sends each question from
@@ -113,20 +113,16 @@ def call_ollama(model: str, prompt: str) -> dict:
             messages=[{"role": "user", "content": prompt}],
             options=config.GENERATION_OPTIONS,
         )
-        answer = response["message"]["content"].strip()
+        # .content can be None for some Ollama builds; guard against that
+        raw_content = response["message"]["content"]
+        answer = raw_content.strip() if raw_content else ""
 
-        # Token usage (available in most Ollama versions)
-        usage = response.get("usage") or {}
-        prompt_tokens      = usage.get("prompt_tokens")
-        completion_tokens  = usage.get("completion_tokens")
-        total_tokens       = usage.get("total_tokens")
-
-        # Fallback: Ollama sometimes puts token counts at top level
-        if prompt_tokens is None:
-            prompt_tokens     = response.get("prompt_eval_count")
-            completion_tokens = response.get("eval_count")
-            if prompt_tokens is not None and completion_tokens is not None:
-                total_tokens = prompt_tokens + completion_tokens
+        # Token usage: Ollama stores counts at the top level of ChatResponse
+        prompt_tokens     = response.get("prompt_eval_count")
+        completion_tokens = response.get("eval_count")
+        total_tokens      = (
+            (prompt_tokens or 0) + (completion_tokens or 0)
+        ) or None
 
     except Exception as exc:
         error = str(exc)

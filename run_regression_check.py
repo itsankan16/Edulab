@@ -69,9 +69,10 @@ REQUIRED_FIGURES: list[str] = [
     "03_subject_heatmap.png",
     "04_subject_bar_comparison.png",
     "05_exact_match_rate.png",
-    "06_score_distribution.png",
-    "07_latency_distribution.png",
-    "08_tokens_vs_latency.png",
+    "06_subject_metric_heatmap.png",   # always generated from subject_leaderboard
+    "07_score_distribution.png",       # requires scored_results.csv
+    "08_latency_distribution.png",     # requires scored_results.csv
+    "09_tokens_vs_latency.png",        # requires scored_results.csv
 ]
 
 # ---------------------------------------------------------------------------

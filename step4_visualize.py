@@ -1,4 +1,4 @@
-﻿"""
+"""
 step4_visualize.py - EduBench-Local Pipeline Step 4
 =====================================================
 Reads evaluation metrics produced by step3_evaluate.py and generates a suite

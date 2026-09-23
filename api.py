@@ -122,9 +122,10 @@ class SubjectRow(BaseModel):
     subject:             str
     n_questions:         int
     exact_match_rate:    float
+    avg_rouge_l:         float | None = None
+    avg_bert_score_f1:   float | None = None
     avg_llm_score_1_5:   float
-    avg_llm_score_0_10:  float
-    avg_latency_s:       float
+    avg_llm_score_0_10:  float | None = None
 
 
 class LeaderboardResponse(BaseModel):
@@ -199,13 +200,14 @@ def _parse_subject_leaderboard(rows: list[dict]) -> list[SubjectRow]:
     for row in rows:
         try:
             out.append(SubjectRow(
-                model              = row["model"],
-                subject            = row["subject"],
-                n_questions        = int(row["n_questions"]),
-                exact_match_rate   = float(row["exact_match_rate"]),
-                avg_llm_score_1_5  = float(row["avg_llm_score_1_5"]),
-                avg_llm_score_0_10 = float(row["avg_llm_score_0_10"]),
-                avg_latency_s      = float(row["avg_latency_s"]),
+                model             = row["model"],
+                subject           = row["subject"],
+                n_questions       = int(row["n_questions"]),
+                exact_match_rate  = float(row["exact_match_rate"]),
+                avg_rouge_l       = float(row["avg_rouge_l"])       if row.get("avg_rouge_l")       else None,
+                avg_bert_score_f1 = float(row["avg_bert_score_f1"]) if row.get("avg_bert_score_f1") else None,
+                avg_llm_score_1_5 = float(row["avg_llm_score_1_5"]),
+                avg_llm_score_0_10= float(row["avg_llm_score_0_10"]) if row.get("avg_llm_score_0_10") else None,
             ))
         except (KeyError, ValueError):
             continue

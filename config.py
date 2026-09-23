@@ -1,4 +1,4 @@
-﻿"""
+"""
 config.py - EduBench-Local Pipeline Configuration
 ===================================================
 Central configuration file. All other pipeline steps import from here.

@@ -203,14 +203,15 @@ RESULTS_DIR = config.RESULTS_DIR
 FIGURES_DIR = config.FIGURES_DIR
 
 FIGURE_TITLES = {
-    "01_overall_score_bars.png":     "Overall Score Comparison",
-    "02_latency_vs_accuracy.png":    "Latency vs. Accuracy",
-    "03_subject_heatmap.png":        "Subject Heatmap",
-    "04_subject_bar_comparison.png": "Per-Subject Bar Comparison",
-    "05_exact_match_rate.png":       "Exact Match Rate",
-    "06_score_distribution.png":     "LLM Score Distribution",
-    "07_latency_distribution.png":   "Latency Distribution",
-    "08_tokens_vs_latency.png":      "Tokens vs. Latency",
+    "01_overall_score_bars.png":      "Overall Score Comparison",
+    "02_latency_vs_accuracy.png":     "Latency vs. Accuracy",
+    "03_subject_heatmap.png":         "LLM Score Heatmap (Model × Subject)",
+    "04_subject_bar_comparison.png":  "Per-Subject Bar Comparison",
+    "05_exact_match_rate.png":        "Exact Match Rate",
+    "06_subject_metric_heatmap.png":  "Subject Multi-Metric Heatmap",
+    "07_score_distribution.png":      "LLM Score Distribution",
+    "08_latency_distribution.png":    "Latency Distribution",
+    "09_tokens_vs_latency.png":       "Tokens vs. Latency",
 }
 
 
@@ -247,8 +248,12 @@ def load_subject_leaderboard() -> pd.DataFrame | None:
     if not p.exists():
         return None
     df = pd.read_csv(p)
-    for c in ["n_questions", "exact_match_rate", "avg_llm_score_1_5",
-              "avg_llm_score_0_10", "avg_latency_s"]:
+    # subject_leaderboard.csv columns: rank, model, subject, n_questions,
+    # exact_match_rate, avg_rouge_l, avg_bert_score_f1, avg_llm_score_1_5,
+    # avg_llm_score_0_10 (added in updated step3_evaluate.py)
+    for c in ["n_questions", "exact_match_rate",
+              "avg_rouge_l", "avg_bert_score_f1",
+              "avg_llm_score_1_5", "avg_llm_score_0_10"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
@@ -377,15 +382,26 @@ if page == "📊  Leaderboard & Analytics":
 
         with col_left:
             disp_sub = sub_lb.copy()
-            disp_sub["Exact Match %"]    = (disp_sub["exact_match_rate"] * 100).map("{:.2f}%".format)
-            disp_sub["LLM Score (1–5)"]  = disp_sub["avg_llm_score_1_5"].map("{:.4f}".format)
-            disp_sub["LLM Score (0–10)"] = disp_sub["avg_llm_score_0_10"].map("{:.4f}".format)
-            disp_sub["Avg Latency (s)"]  = disp_sub["avg_latency_s"].map("{:.3f}".format)
-            disp_sub["N"]                = disp_sub["n_questions"].astype(int)
+            disp_sub["Exact Match %"]   = (disp_sub["exact_match_rate"] * 100).map("{:.2f}%".format)
+            disp_sub["LLM Score (1-5)"] = disp_sub["avg_llm_score_1_5"].map("{:.4f}".format)
+            disp_sub["N"]               = disp_sub["n_questions"].astype(int)
+
+            # Optional columns — present only when subject_leaderboard.csv has them
+            show_sub_cols = ["model", "subject", "N", "Exact Match %", "LLM Score (1-5)"]
+            if "avg_llm_score_0_10" in disp_sub.columns:
+                disp_sub["LLM Score (0-10)"] = disp_sub["avg_llm_score_0_10"].map("{:.4f}".format)
+                show_sub_cols.append("LLM Score (0-10)")
+            if "avg_rouge_l" in disp_sub.columns:
+                disp_sub["ROUGE-L"] = disp_sub["avg_rouge_l"].map("{:.4f}".format)
+                show_sub_cols.append("ROUGE-L")
+            if "avg_bert_score_f1" in disp_sub.columns:
+                disp_sub["BERT-F1"] = disp_sub["avg_bert_score_f1"].map("{:.4f}".format)
+                show_sub_cols.append("BERT-F1")
+
             st.dataframe(
-                disp_sub[["model", "subject", "N", "Exact Match %",
-                           "LLM Score (1–5)", "LLM Score (0–10)", "Avg Latency (s)"]
-                         ].rename(columns={"model": "Model", "subject": "Subject"}),
+                disp_sub[show_sub_cols].rename(
+                    columns={"model": "Model", "subject": "Subject"}
+                ),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -677,13 +693,14 @@ elif page == "🧪  Live Model Playground":
                         options={"temperature": temperature, "num_predict": max_tokens},
                     )
                     elapsed = time.perf_counter() - t0
-                    answer  = resp["message"]["content"].strip()
-                    usage   = resp.get("usage", {})
+                    raw_content = resp["message"]["content"]
+                    answer  = raw_content.strip() if raw_content else ""
+                    # Ollama token counts live at the top level of ChatResponse
+                    prompt_toks     = resp.get("prompt_eval_count")
+                    completion_toks = resp.get("eval_count")
                     total_toks = (
-                        usage.get("total_tokens")
-                        or (usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0))
-                        or resp.get("eval_count", "—")
-                    )
+                        (prompt_toks or 0) + (completion_toks or 0)
+                    ) or resp.get("eval_count") or "—"
                     st.session_state["pg_response"] = answer
                     st.session_state["pg_latency"]  = elapsed
                     st.session_state["pg_model"]    = model_choice
@@ -708,7 +725,7 @@ elif page == "🧪  Live Model Playground":
         h1, h2, h3, h4 = st.columns(4)
         h1.metric("Model",    resp_model)
         h2.metric("Latency",  f"{lat:.2f}s"   if lat is not None else "—")
-        h3.metric("Tokens",   str(n_toks)      if n_toks else "—")
+        h3.metric("Tokens",   str(n_toks) if n_toks is not None and n_toks != "—" else "—")
         h4.metric("Temp.",    f"{temperature:.2f}")
 
         st.markdown("")

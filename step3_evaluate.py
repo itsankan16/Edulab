@@ -91,6 +91,7 @@ SUBJECT_LEADERBOARD_FIELDNAMES = [
     "avg_rouge_l",
     "avg_bert_score_f1",
     "avg_llm_score_1_5",
+    "avg_llm_score_0_10",
 ]
 
 
@@ -148,7 +149,8 @@ def _call_judge(reference_answer: str, student_answer: str) -> dict:
             messages=[{"role": "user", "content": prompt}],
             options={"temperature": 0.0, "num_predict": 150},
         )
-        raw = response["message"]["content"].strip()
+        raw = response["message"]["content"]
+        raw = raw.strip() if raw else ""
 
         # Extract the JSON object even if the model wraps it in prose
         match = re.search(r'\{[^{}]*"score"\s*:\s*\d+[^{}]*\}', raw)
@@ -329,7 +331,7 @@ def write_subject_leaderboard(rows: list[dict]) -> list[dict]:
             groups[key] = {
                 "n": 0, "em_sum": 0,
                 "rougeL_sum": 0.0, "bert_sum": 0.0,
-                "llm5_sum": 0.0,
+                "llm5_sum": 0.0, "llm10_sum": 0.0,
             }
         d = groups[key]
         d["n"]          += 1
@@ -337,6 +339,7 @@ def write_subject_leaderboard(rows: list[dict]) -> list[dict]:
         d["rougeL_sum"] += _safe_float(row.get("rouge_l"))
         d["bert_sum"]   += _safe_float(row.get("bert_score_f1"))
         d["llm5_sum"]   += _safe_float(row.get("llm_score_1_5"))
+        d["llm10_sum"]  += _safe_float(row.get("llm_score_0_10"))
 
     # Sort: model asc, then subject asc
     ranked = sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1]))
@@ -345,14 +348,15 @@ def write_subject_leaderboard(rows: list[dict]) -> list[dict]:
     for rank, ((model, subject), d) in enumerate(ranked, 1):
         n = d["n"]
         out_rows.append({
-            "rank":              rank,
-            "model":             model,
-            "subject":           subject,
-            "n_questions":       n,
-            "exact_match_rate":  f"{d['em_sum']/n:.4f}",
-            "avg_rouge_l":       f"{d['rougeL_sum']/n:.4f}",
-            "avg_bert_score_f1": f"{d['bert_sum']/n:.4f}",
-            "avg_llm_score_1_5": f"{d['llm5_sum']/n:.4f}",
+            "rank":               rank,
+            "model":              model,
+            "subject":            subject,
+            "n_questions":        n,
+            "exact_match_rate":   f"{d['em_sum']/n:.4f}",
+            "avg_rouge_l":        f"{d['rougeL_sum']/n:.4f}",
+            "avg_bert_score_f1":  f"{d['bert_sum']/n:.4f}",
+            "avg_llm_score_1_5":  f"{d['llm5_sum']/n:.4f}",
+            "avg_llm_score_0_10": f"{d['llm10_sum']/n:.4f}",
         })
 
     with open(SUBJECT_LEADERBOARD_PATH, "w", newline="", encoding="utf-8") as f:
@@ -481,10 +485,11 @@ def main() -> None:
                 csv_writer.writerow(row)
                 csv_file.flush()
 
+                n_done = pbar.n + 1   # +1 because pbar.n is the count *before* this item
                 pbar.set_postfix({
-                    "EM":       f"{em_total/(pbar.n+1):.0%}",
-                    "ROUGE-L":  f"{rougeL_sum/(pbar.n+1):.3f}",
-                    "LLM(1-5)": f"{llm5_sum/(pbar.n+1):.2f}",
+                    "EM":       f"{em_total/n_done:.0%}",
+                    "ROUGE-L":  f"{rougeL_sum/n_done:.3f}",
+                    "LLM(1-5)": f"{llm5_sum/n_done:.2f}",
                     "jerr":     judge_errors,
                 })
         finally:
