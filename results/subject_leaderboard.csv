@@ -1,6 +1,6 @@
-model,subject,n_questions,exact_match_rate,avg_llm_score_1_5,avg_llm_score_0_10,avg_latency_s
-qwen2.5:3b,general_science,150,0.0000,3.4267,6.0067,2.5389
-qwen2.5:3b,reading_comprehension,150,0.0267,3.7533,6.6867,6.0387
-qwen2.5:3b,reading_comprehension_squad,150,0.0200,4.5400,8.7667,3.0646
-qwen2.5:3b,science,277,0.0794,4.7798,9.2708,3.3824
-qwen2.5:3b,science_challenge,150,0.0000,4.0600,7.3867,3.5648
+rank,model,subject,n_questions,exact_match_rate,avg_rouge_l,avg_bert_score_f1,avg_llm_score_1_5
+1,qwen2.5:3b,general_science,150,0.0000,0.0573,0.8418,3.4267
+2,qwen2.5:3b,reading_comprehension,150,0.0267,0.0000,0.8814,3.7533
+3,qwen2.5:3b,reading_comprehension_squad,150,0.0200,0.2947,0.8731,4.5400
+4,qwen2.5:3b,science,150,0.1000,0.2271,0.8593,4.7867
+5,qwen2.5:3b,science_challenge,150,0.0000,0.1059,0.8566,4.0600

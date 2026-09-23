@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 # 🎓 EduBench-Local
 
@@ -174,12 +174,12 @@ Evaluated on **877 questions** across **5 subjects** with `qwen2.5:3b`:
 
 | Subject | EM% | ROUGE-L | BERT-F1 | LLM (1–5) | N |
 |---------|-----|---------|---------|-----------|---|
-| science | 7.9% | 0.123 | 0.857 | **4.78** | 277 |
+| science | **10.0%** | 0.227 | 0.859 | **4.79** | 150 |
 | reading_comprehension_squad | 2.0% | 0.295 | 0.873 | 4.54 | 150 |
 | science_challenge | 0.0% | 0.106 | 0.857 | 4.06 | 150 |
 | reading_comprehension | 2.7% | 0.000 | 0.881 | 3.75 | 150 |
 | general_science | 0.0% | 0.057 | 0.842 | 3.43 | 150 |
-| **Overall** | **3.3%** | **0.117** | **0.861** | **4.21** | **877** |
+| **Overall** | **2.9%** | **0.137** | **0.863** | **4.11** | **750** |
 
 > High BERT-F1 with low Exact Match indicates the model produces semantically correct answers but doesn't mirror reference wording exactly — typical generative behaviour.
 
