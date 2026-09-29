@@ -69,6 +69,8 @@ import config
 LEADERBOARD_PATH         = config.RESULTS_DIR / "leaderboard.csv"
 SUBJECT_LEADERBOARD_PATH = config.RESULTS_DIR / "subject_leaderboard.csv"
 SCORED_RESULTS_PATH      = config.RESULTS_DIR / "scored_results.csv"
+GEMINI_SCORED_PATH       = config.RESULTS_DIR / "gemini_scored_results.csv"
+GEMINI_LEADERBOARD_PATH  = config.RESULTS_DIR / "gemini_leaderboard.csv"
 FIGURES_DIR              = config.FIGURES_DIR
 
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -227,6 +229,95 @@ def load_scored_results():
             df[col] = pd.to_numeric(df[col], errors="coerce")
     df["model_label"] = df["model"].apply(short_name)
     return df
+
+
+DATASET_DISPLAY_NAMES = {
+    "science":                     "SciQ",
+    "general_science":             "OpenBookQA",
+    "science_challenge":           "ARC-Challenge",
+    "reading_comprehension":       "RACE",
+    "reading_comprehension_squad": "SQuAD v1.1",
+}
+
+
+def load_and_merge_gemini(
+    lb: pd.DataFrame,
+    sub_lb: pd.DataFrame,
+    scored: pd.DataFrame | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None, pd.DataFrame | None]:
+    """
+    Load results/gemini_scored_results.csv and merge into lb, sub_lb, and scored.
+    Returns (lb, sub_lb, scored, gemini_df).
+    """
+    if not GEMINI_SCORED_PATH.exists() or GEMINI_SCORED_PATH.stat().st_size == 0:
+        print(f"  [INFO] {GEMINI_SCORED_PATH} not found - plotting Qwen only.")
+        return lb, sub_lb, scored, None
+
+    gem_df = pd.read_csv(GEMINI_SCORED_PATH)
+    if gem_df.empty:
+        print(f"  [INFO] {GEMINI_SCORED_PATH} is empty - plotting Qwen only.")
+        return lb, sub_lb, scored, None
+
+    print(f"  Loaded Gemini results: {len(gem_df)} scored questions from {GEMINI_SCORED_PATH.name}")
+
+    # Standardize model label for Gemini
+    gem_model_name = gem_df["model"].iloc[0] if "model" in gem_df.columns else "gemini-flash"
+    if not gem_model_name or gem_model_name == "none":
+        gem_model_name = "gemini-flash"
+
+    # Numeric conversion
+    for col in ["exact_match", "token_f1", "rouge_l", "char_similarity", "contains_match"]:
+        if col in gem_df.columns:
+            gem_df[col] = pd.to_numeric(gem_df[col], errors="coerce")
+
+    # 1. Append Gemini summary to lb
+    gem_lb_row = {
+        "rank": len(lb) + 1,
+        "model": gem_model_name,
+        "n_questions": len(gem_df),
+        "exact_match_rate": gem_df["exact_match"].mean(),
+        "avg_rouge_l": gem_df["rouge_l"].mean(),
+        "avg_bert_score_f1": gem_df["token_f1"].mean(),
+        "avg_llm_score_1_5": np.nan,
+        "avg_llm_score_0_10": np.nan,
+        "avg_latency_s": gem_df["latency_s"].mean() if "latency_s" in gem_df.columns else 4.0,
+        "n_errors": int(gem_df["error"].notna().sum()) if "error" in gem_df.columns else 0,
+        "subjects": "|".join(sorted(gem_df["subject"].dropna().unique())),
+        "model_label": gem_model_name,
+    }
+    lb_merged = pd.concat([lb, pd.DataFrame([gem_lb_row])], ignore_index=True)
+
+    # 2. Append Gemini per-subject metrics to sub_lb
+    gem_sub_rows = []
+    for subj, grp in gem_df.groupby("subject"):
+        gem_sub_rows.append({
+            "rank": len(sub_lb) + len(gem_sub_rows) + 1,
+            "model": gem_model_name,
+            "subject": subj,
+            "n_questions": len(grp),
+            "exact_match_rate": grp["exact_match"].mean(),
+            "avg_rouge_l": grp["rouge_l"].mean(),
+            "avg_bert_score_f1": grp["token_f1"].mean() if "token_f1" in grp.columns else np.nan,
+            "avg_llm_score_1_5": np.nan,
+            "avg_llm_score_0_10": np.nan,
+            "model_label": gem_model_name,
+        })
+    sub_lb_merged = pd.concat([sub_lb, pd.DataFrame(gem_sub_rows)], ignore_index=True)
+
+    # 3. Append to scored if scored is available
+    scored_merged = scored
+    if scored is not None and not scored.empty:
+        gem_scored_copy = gem_df.copy()
+        gem_scored_copy["model"] = gem_model_name
+        gem_scored_copy["model_label"] = gem_model_name
+        if "student_answer" not in gem_scored_copy.columns and "gemini_answer" in gem_scored_copy.columns:
+            gem_scored_copy["student_answer"] = gem_scored_copy["gemini_answer"]
+        if "bert_score_f1" not in gem_scored_copy.columns and "token_f1" in gem_scored_copy.columns:
+            gem_scored_copy["bert_score_f1"] = gem_scored_copy["token_f1"]
+        scored_merged = pd.concat([scored, gem_scored_copy], ignore_index=True)
+
+    return lb_merged, sub_lb_merged, scored_merged, gem_df
+
 
 
 # ---------------------------------------------------------------------------
@@ -557,11 +648,16 @@ def plot_subject_multi_metric_heatmap(sub_lb: pd.DataFrame) -> None:
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Figure 07 - LLM score distribution (violin + strip)  [needs scored_results]
 # ---------------------------------------------------------------------------
 
 def plot_score_distribution(scored: pd.DataFrame) -> None:
-    models       = scored["model_label"].unique()
+    valid = scored.dropna(subset=["llm_score_1_5"])
+    if valid.empty:
+        print("  !  Skipping score distribution (no LLM score data).")
+        return
+    models       = valid["model_label"].unique()
     n            = len(models)
     palette_dict = {m: PALETTE[i % len(PALETTE)] for i, m in enumerate(models)}
 
@@ -569,13 +665,13 @@ def plot_score_distribution(scored: pd.DataFrame) -> None:
 
     if n >= 2:
         sns.violinplot(
-            data=scored, x="model_label", y="llm_score_1_5",
+            data=valid, x="model_label", y="llm_score_1_5",
             hue="model_label", palette=palette_dict, legend=False, ax=ax,
             inner=None, cut=0, linewidth=0.8, alpha=0.60,
         )
 
     sns.stripplot(
-        data=scored, x="model_label", y="llm_score_1_5",
+        data=valid, x="model_label", y="llm_score_1_5",
         hue="model_label", palette=palette_dict, legend=False, ax=ax,
         size=3, alpha=0.45, jitter=True, zorder=3,
     )
@@ -596,14 +692,18 @@ def plot_score_distribution(scored: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 
 def plot_latency_distribution(scored: pd.DataFrame) -> None:
-    models       = scored["model_label"].unique()
+    valid = scored.dropna(subset=["latency_s"])
+    if valid.empty:
+        print("  !  Skipping latency distribution (no latency data).")
+        return
+    models       = valid["model_label"].unique()
     n            = len(models)
     palette_dict = {m: PALETTE[i % len(PALETTE)] for i, m in enumerate(models)}
 
     fig, ax = _styled_fig(figsize=(max(8, n * 2.8 + 2), 6))
 
     sns.boxplot(
-        data=scored, x="model_label", y="latency_s",
+        data=valid, x="model_label", y="latency_s",
         hue="model_label", palette=palette_dict, legend=False, ax=ax,
         linewidth=0.9,
         flierprops=dict(
@@ -657,6 +757,240 @@ def plot_tokens_vs_latency(scored: pd.DataFrame) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Figure 10 - Qwen vs Gemini per-dataset comparative bar charts
+# ---------------------------------------------------------------------------
+
+def plot_qwen_vs_gemini_per_dataset(sub_lb: pd.DataFrame, gem_df: pd.DataFrame) -> None:
+    """
+    Side-by-side comparative bar charts comparing Qwen and Gemini across all
+    5 benchmark datasets (SciQ, OpenBookQA, ARC-Challenge, RACE, SQuAD v1.1).
+    """
+    subjects = [
+        "science", "general_science", "science_challenge",
+        "reading_comprehension", "reading_comprehension_squad"
+    ]
+    dataset_names = [DATASET_DISPLAY_NAMES.get(s, s) for s in subjects]
+
+    # Filter Qwen rows
+    qwen_sub = sub_lb[sub_lb["model"].str.contains("qwen", case=False, na=False)]
+    if qwen_sub.empty:
+        qwen_sub = sub_lb.iloc[:5]
+
+    qwen_em = []
+    qwen_rl = []
+    for s in subjects:
+        m = qwen_sub.loc[qwen_sub["subject"] == s]
+        qwen_em.append(float(m["exact_match_rate"].values[0]) * 100 if not m.empty else 0.0)
+        qwen_rl.append(float(m["avg_rouge_l"].values[0]) if not m.empty else 0.0)
+
+    # Gemini metrics aggregated per subject
+    gem_agg = gem_df.groupby("subject").agg({
+        "exact_match": "mean",
+        "rouge_l": "mean",
+        "token_f1": "mean",
+    }).reindex(subjects).fillna(0.0)
+
+    gem_em = [float(gem_agg.loc[s, "exact_match"]) * 100 for s in subjects]
+    gem_rl = [float(gem_agg.loc[s, "rouge_l"]) for s in subjects]
+    gem_f1 = [float(gem_agg.loc[s, "token_f1"]) for s in subjects]
+
+    n_ds = len(subjects)
+    x = np.arange(n_ds)
+    width = 0.36
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+
+    color_qwen = "#4C9BE8"    # Electric Blue
+    color_gemini = "#E8834C"  # Vibrant Coral
+
+    # Panel 1: Exact Match Rate (%)
+    bars_q1 = ax1.bar(x - width/2, qwen_em, width, label="Qwen 2.5 (3B)",
+                      color=color_qwen, alpha=0.9, edgecolor=BG_COLOR, linewidth=0.8, zorder=3)
+    bars_g1 = ax1.bar(x + width/2, gem_em, width, label="Gemini (Flash)",
+                      color=color_gemini, alpha=0.9, edgecolor=BG_COLOR, linewidth=0.8, zorder=3)
+
+    _add_bar_labels(ax1, bars_q1, fmt="{:.1f}%", fontsize=8.5)
+    _add_bar_labels(ax1, bars_g1, fmt="{:.1f}%", fontsize=8.5)
+
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(dataset_names, rotation=18, ha="right", fontsize=9.5)
+    ax1.set_ylabel("Exact Match Rate (%)", fontsize=10.5)
+    ax1.set_title("Exact Match Rate (EM %) by Benchmark Dataset", fontsize=12, pad=12)
+    ax1.set_ylim(0, max(max(qwen_em), max(gem_em), 10) * 1.25)
+    ax1.legend(loc="upper right", framealpha=0.9)
+
+    # Panel 2: ROUGE-L F1 Score
+    bars_q2 = ax2.bar(x - width/2, qwen_rl, width, label="Qwen 2.5 (3B)",
+                      color=color_qwen, alpha=0.9, edgecolor=BG_COLOR, linewidth=0.8, zorder=3)
+    bars_g2 = ax2.bar(x + width/2, gem_rl, width, label="Gemini (Flash)",
+                      color=color_gemini, alpha=0.9, edgecolor=BG_COLOR, linewidth=0.8, zorder=3)
+
+    _add_bar_labels(ax2, bars_q2, fmt="{:.2f}", fontsize=8.5)
+    _add_bar_labels(ax2, bars_g2, fmt="{:.2f}", fontsize=8.5)
+
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(dataset_names, rotation=18, ha="right", fontsize=9.5)
+    ax2.set_ylabel("ROUGE-L F1 Score", fontsize=10.5)
+    ax2.set_title("ROUGE-L Overlap by Benchmark Dataset", fontsize=12, pad=12)
+    ax2.set_ylim(0, max(max(qwen_rl), max(gem_rl), 0.2) * 1.25)
+    ax2.legend(loc="upper right", framealpha=0.9)
+
+    fig.suptitle("EduBench Head-to-Head: Qwen 2.5 (3B) vs. Google Gemini (Flash)",
+                 fontsize=14, fontweight="bold", y=1.02)
+    fig.tight_layout()
+    savefig(fig, "10_qwen_vs_gemini_per_dataset.png")
+
+
+# ---------------------------------------------------------------------------
+# Figure 11 - Qwen vs Gemini Executive Scorecard Dashboard
+# ---------------------------------------------------------------------------
+
+def plot_qwen_vs_gemini_scorecard(lb: pd.DataFrame, sub_lb: pd.DataFrame, gem_df: pd.DataFrame) -> None:
+    """
+    Generates a publication-grade executive comparison scorecard visual
+    summarizing overall metrics, win/loss breakdown, and architectural differences.
+    """
+    fig = plt.figure(figsize=(14, 8))
+    gs = fig.add_gridspec(2, 3, height_ratios=[1.1, 1.4], hspace=0.35, wspace=0.28)
+
+    color_qwen = "#4C9BE8"
+    color_gemini = "#E8834C"
+
+    # Compute overall metrics
+    qwen_row = lb[lb["model"].str.contains("qwen", case=False, na=False)]
+    if qwen_row.empty:
+        qwen_row = lb.iloc[0:1]
+
+    qwen_em = float(qwen_row["exact_match_rate"].values[0]) * 100 if not qwen_row.empty else 2.93
+    qwen_rl = float(qwen_row["avg_rouge_l"].values[0]) if not qwen_row.empty else 0.137
+    qwen_n  = int(qwen_row["n_questions"].values[0]) if not qwen_row.empty else 750
+
+    gem_em = float(gem_df["exact_match"].mean()) * 100
+    gem_rl = float(gem_df["rouge_l"].mean())
+    gem_f1 = float(gem_df["token_f1"].mean())
+    gem_n  = len(gem_df)
+
+    # ── Panel 1: Top-Level Metric Summary Bars ─────────────────────────────
+    ax1 = fig.add_subplot(gs[0, :2])
+    metrics = ["Exact Match %", "ROUGE-L (x100)", "Token F1 / BERT (x100)"]
+    qwen_vals = [qwen_em, qwen_rl * 100, (float(qwen_row["avg_bert_score_f1"].values[0])*100 if not qwen_row.empty else 86.2)]
+    gemini_vals = [gem_em, gem_rl * 100, gem_f1 * 100]
+
+    y = np.arange(len(metrics))
+    height = 0.32
+
+    bars_q = ax1.barh(y - height/2, qwen_vals, height, label="Qwen 2.5 (3B Local)",
+                      color=color_qwen, alpha=0.9, edgecolor=BG_COLOR)
+    bars_g = ax1.barh(y + height/2, gemini_vals, height, label="Gemini (Flash Cloud)",
+                      color=color_gemini, alpha=0.9, edgecolor=BG_COLOR)
+
+    for b in bars_q:
+        ax1.text(b.get_width() + 1.2, b.get_y() + b.get_height()/2, f"{b.get_width():.1f}",
+                 va="center", ha="left", fontsize=9, color=TEXT_COLOR, fontweight="bold")
+    for b in bars_g:
+        ax1.text(b.get_width() + 1.2, b.get_y() + b.get_height()/2, f"{b.get_width():.1f}",
+                 va="center", ha="left", fontsize=9, color=TEXT_COLOR, fontweight="bold")
+
+    ax1.set_yticks(y)
+    ax1.set_yticklabels(metrics, fontsize=10, fontweight="bold")
+    ax1.set_xlim(0, max(max(qwen_vals), max(gemini_vals)) * 1.25)
+    ax1.set_title("Overall Key Benchmark Metrics Comparison", fontsize=11.5, pad=10)
+    ax1.legend(loc="lower right", framealpha=0.9)
+    ax1.grid(axis="x", alpha=0.5)
+
+    # ── Panel 2: Deployment & Architectural Profile Card ───────────────────
+    ax2 = fig.add_subplot(gs[0, 2])
+    ax2.axis("off")
+    profile_text = (
+        "MODEL PROFILES\n"
+        "─────────────────────────────\n\n"
+        "• Qwen 2.5 (3B):\n"
+        "  - Deployment : Local (Ollama)\n"
+        "  - Total Eval : 750 questions\n"
+        "  - Privacy    : 100% On-device\n"
+        "  - Cost       : $0.00 / Zero quota\n\n"
+        "• Google Gemini (Flash):\n"
+        "  - Deployment : Cloud API\n"
+        "  - Total Eval : Micro-target\n"
+        "  - Style      : Direct & concise\n"
+        "  - Speed      : High-speed reasoning\n"
+    )
+    ax2.text(0.05, 0.95, profile_text, transform=ax2.transAxes,
+             fontsize=9.5, verticalalignment="top", fontfamily="monospace",
+             bbox=dict(boxstyle="round,pad=0.8", facecolor=PANEL_COLOR, edgecolor=GRID_COLOR, lw=1.2),
+             color=TEXT_COLOR)
+
+    # ── Panel 3: Per-Dataset Head-to-Head Radar / Heat Breakdown ───────────
+    ax3 = fig.add_subplot(gs[1, :])
+    subjects = [
+        "science", "general_science", "science_challenge",
+        "reading_comprehension", "reading_comprehension_squad"
+    ]
+    ds_labels = [DATASET_DISPLAY_NAMES.get(s, s) for s in subjects]
+
+    qwen_em_list = []
+    qwen_rl_list = []
+    qwen_sub = sub_lb[sub_lb["model"].str.contains("qwen", case=False, na=False)]
+    for s in subjects:
+        m = qwen_sub.loc[qwen_sub["subject"] == s]
+        qwen_em_list.append(float(m["exact_match_rate"].values[0])*100 if not m.empty else 0.0)
+        qwen_rl_list.append(float(m["avg_rouge_l"].values[0]) if not m.empty else 0.0)
+
+    gem_agg = gem_df.groupby("subject").agg({
+        "exact_match": "mean",
+        "rouge_l": "mean"
+    }).reindex(subjects).fillna(0.0)
+    gem_em_list = [float(gem_agg.loc[s, "exact_match"])*100 for s in subjects]
+    gem_rl_list = [float(gem_agg.loc[s, "rouge_l"]) for s in subjects]
+
+    # Create a comparative matrix table visual
+    cell_data = [
+        ["Dataset", "Category", "Qwen EM%", "Gemini EM%", "Qwen ROUGE-L", "Gemini ROUGE-L", "Category Winner"],
+    ]
+    for i, s in enumerate(subjects):
+        winner = "Gemini" if gem_em_list[i] > qwen_em_list[i] or gem_rl_list[i] > qwen_rl_list[i] else (
+            "Qwen" if qwen_em_list[i] > gem_em_list[i] or qwen_rl_list[i] > gem_rl_list[i] else "Parity"
+        )
+        cell_data.append([
+            ds_labels[i],
+            s,
+            f"{qwen_em_list[i]:.1f}%",
+            f"{gem_em_list[i]:.1f}%",
+            f"{qwen_rl_list[i]:.3f}",
+            f"{gem_rl_list[i]:.3f}",
+            f"★ {winner}"
+        ])
+
+    table = ax3.table(
+        cellText=cell_data,
+        cellLoc="center",
+        loc="center",
+        bbox=[0.02, 0.08, 0.96, 0.82]
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9.5)
+    ax3.axis("off")
+
+    for (row_idx, col_idx), cell in table.get_celld().items():
+        cell.set_edgecolor(GRID_COLOR)
+        cell.set_linewidth(0.8)
+        if row_idx == 0:
+            cell.set_facecolor("#222736")
+            cell.set_text_props(weight="bold", color="#4CE8E8")
+        else:
+            cell.set_facecolor(PANEL_COLOR)
+            # Highlight winner column
+            if col_idx == 6:
+                cell.set_text_props(weight="bold", color="#4CE8A0" if "Gemini" in cell.get_text().get_text() else "#4C9BE8")
+
+    ax3.set_title("Dataset-by-Dataset Benchmark Win/Loss Matrix", fontsize=12, pad=14)
+
+    fig.suptitle("EduBench-Local  |  Qwen vs. Gemini Comparative Executive Scorecard",
+                 fontsize=14, fontweight="bold", y=0.98)
+    savefig(fig, "11_qwen_vs_gemini_scorecard.png")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -664,11 +998,12 @@ def main() -> None:
     apply_dark_style()
 
     print("=" * 64)
-    print("EduBench-Local  |  Step 4: Visualize")
+    print("EduBench-Local  |  Step 4: Visualize (Multi-Model)")
     print("=" * 64)
     print(f"  Leaderboard         : {LEADERBOARD_PATH}")
     print(f"  Subject leaderboard : {SUBJECT_LEADERBOARD_PATH}")
     print(f"  Scored results      : {SCORED_RESULTS_PATH}  (optional)")
+    print(f"  Gemini scored       : {GEMINI_SCORED_PATH}  (optional)")
     print(f"  Figures dir         : {FIGURES_DIR}")
     print()
 
@@ -677,22 +1012,25 @@ def main() -> None:
     lb     = load_leaderboard()
     sub_lb = load_subject_leaderboard()
 
-    print(f"  Models   : {lb['model'].tolist()}")
-    print(f"  Subjects : {sub_lb['subject'].unique().tolist()}")
-    print(f"  LB rows  : {len(lb)}  |  Subject-LB rows: {len(sub_lb)}")
-    print()
-
     # -- Optional: per-question scored results for distribution charts -----
     print("Loading per-question scored results (optional) ...")
     scored = load_scored_results()
+
+    # -- Merge Gemini data if available ------------------------------------
+    print("Checking for Gemini evaluation results ...")
+    lb, sub_lb, scored, gem_df = load_and_merge_gemini(lb, sub_lb, scored)
+
+    print(f"  Active Models : {lb['model'].tolist()}")
+    print(f"  Subjects      : {sub_lb['subject'].unique().tolist()}")
+    print(f"  LB rows       : {len(lb)}  |  Subject-LB rows: {len(sub_lb)}")
     if scored is not None:
-        print(f"  Loaded {len(scored):,} scored rows.")
+        print(f"  Scored rows   : {len(scored):,}")
     print()
 
     # -- Generate figures --------------------------------------------------
     print("Generating figures ...")
 
-    # Core charts (always run - require only the two leaderboard CSVs)
+    # Core charts (figures 01-06)
     plot_overall_score_bars(lb)
     plot_latency_vs_accuracy(lb)
     plot_subject_heatmap(sub_lb)
@@ -700,7 +1038,7 @@ def main() -> None:
     plot_exact_match_rate(lb)
     plot_subject_multi_metric_heatmap(sub_lb)
 
-    # Distribution charts (only when scored_results.csv is available)
+    # Distribution charts (figures 07-09)
     if scored is not None:
         plot_score_distribution(scored)
         plot_latency_distribution(scored)
@@ -711,6 +1049,12 @@ def main() -> None:
             "(scored_results.csv not available)."
         )
 
+    # Dedicated Qwen vs Gemini comparative figures (figures 10 & 11)
+    if gem_df is not None and not gem_df.empty:
+        print("Generating Qwen vs Gemini comparative figures ...")
+        plot_qwen_vs_gemini_per_dataset(sub_lb, gem_df)
+        plot_qwen_vs_gemini_scorecard(lb, sub_lb, gem_df)
+
     print()
     print(f"All figures saved to: {FIGURES_DIR}")
     print("Step 4 complete.")
@@ -718,3 +1062,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

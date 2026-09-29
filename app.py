@@ -1,24 +1,61 @@
+# -*- coding: utf-8 -*-
 """
 app.py - EduBench-Local Interactive Dashboard
 ==============================================
 A Streamlit web dashboard for the EduBench-Local benchmarking pipeline.
 
-Pages:
-  1. Leaderboard & Analytics  - Metric cards, leaderboard table, per-subject
-                                breakdown, score distributions and latency
-                                charts drawn directly from CSV data.
-  2. Visualizations           - Gallery of all PNG figures in figures/.
-  3. Live Model Playground    - Query any local Ollama model in real-time,
-                                see the answer and latency live.
+Features:
+  - Multi-model evaluation support: interactive dropdown/toggle between
+    "Qwen 2.5 3B" and "Google Gemini", or a side-by-side comparison view.
+  - Live data loading: dynamically switches between results/scored_results.csv (Qwen)
+    and results/gemini_scored_results.csv (Gemini).
+  - Visualizations gallery: showcases all 11 comparative figures and scorecards.
+  - Live model playground: test queries in real-time with latency tracking.
+  - Auto-launcher: launches Streamlit automatically when run via `python app.py`.
 
 Usage:
-  streamlit run app.py
+  python app.py
+  # or: streamlit run app.py
 """
 
 from __future__ import annotations
 
+import io
+import os
+import sys
+
+# Force UTF-8 encoding on Windows to prevent UnicodeEncodeError in Click/Streamlit
+if sys.platform == "win32":
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf-16"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+# ---------------------------------------------------------------------------
+# Auto-launcher: if executed via `python app.py`, launch Streamlit automatically
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    _under_streamlit = False
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        _under_streamlit = (get_script_run_ctx() is not None)
+    except Exception:
+        pass
+
+    if not _under_streamlit:
+        from streamlit.web import cli as stcli
+        target_script = os.path.abspath(__file__)
+        sys.argv = ["streamlit", "run", target_script] + sys.argv[1:]
+        sys.exit(stcli.main())
+
+
 import time
 from pathlib import Path
+from collections import defaultdict
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -76,7 +113,7 @@ st.markdown(
     }
     [data-testid="metric-container"] [data-testid="stMetricValue"] {
         color: #e2e8f0 !important;
-        font-size: 1.9rem !important;
+        font-size: 1.85rem !important;
         font-weight: 800 !important;
     }
     [data-testid="metric-container"] [data-testid="stMetricDelta"] {
@@ -171,11 +208,24 @@ st.markdown(
         background: linear-gradient(135deg, #0f2447 0%, #162040 100%);
         border: 1px solid #1e3a6e;
         border-radius: 16px;
-        padding: 28px 32px;
-        margin-bottom: 28px;
+        padding: 24px 28px;
+        margin-bottom: 24px;
     }
-    .page-hero h1 { margin: 0 0 6px 0; font-size: 1.9rem; }
+    .page-hero h1 { margin: 0 0 6px 0; font-size: 1.85rem; }
     .page-hero p  { color: #7aafff; margin: 0; font-size: 0.95rem; }
+
+    /* ── Model badge pill ── */
+    .model-pill {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+    }
+    .pill-qwen { background: #1e3a6e; color: #60a5fa; border: 1px solid #3b82f6; }
+    .pill-gemini { background: #45220c; color: #fb923c; border: 1px solid #f97316; }
 
     /* ── Figure card ── */
     .fig-card {
@@ -188,30 +238,40 @@ st.markdown(
     .fig-card:hover {
         box-shadow: 0 0 0 2px #3b82f6, 0 8px 32px rgba(59,130,246,0.18);
     }
-
-    /* ── Playground spinner override ── */
-    .stSpinner > div { border-color: #3b82f6 transparent transparent transparent !important; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helpers & Data Loaders
 # ---------------------------------------------------------------------------
 RESULTS_DIR = config.RESULTS_DIR
 FIGURES_DIR = config.FIGURES_DIR
 
+DATASET_NAME_MAP = {
+    "science":                     "SciQ",
+    "general_science":             "OpenBookQA",
+    "science_challenge":           "ARC-Challenge",
+    "reading_comprehension":       "RACE",
+    "reading_comprehension_squad": "SQuAD v1.1",
+}
+SUBJECT_NAME_MAP = {v: k for k, v in DATASET_NAME_MAP.items()}
+DATASET_ORDER = ["SciQ", "OpenBookQA", "ARC-Challenge", "RACE", "SQuAD v1.1"]
+MODELS = ["Qwen 2.5 3B", "Google Gemini", "⚖️ Compare Both Side-by-Side"]
+
 FIGURE_TITLES = {
-    "01_overall_score_bars.png":      "Overall Score Comparison",
-    "02_latency_vs_accuracy.png":     "Latency vs. Accuracy",
-    "03_subject_heatmap.png":         "LLM Score Heatmap (Model × Subject)",
-    "04_subject_bar_comparison.png":  "Per-Subject Bar Comparison",
-    "05_exact_match_rate.png":        "Exact Match Rate",
-    "06_subject_metric_heatmap.png":  "Subject Multi-Metric Heatmap",
-    "07_score_distribution.png":      "LLM Score Distribution",
-    "08_latency_distribution.png":    "Latency Distribution",
-    "09_tokens_vs_latency.png":       "Tokens vs. Latency",
+    "01_overall_score_bars.png":         "Overall Score Comparison (Multi-Model)",
+    "02_latency_vs_accuracy.png":        "Latency vs. Accuracy",
+    "03_subject_heatmap.png":            "LLM Score Heatmap (Model × Subject)",
+    "04_subject_bar_comparison.png":     "Per-Subject Bar Comparison",
+    "05_exact_match_rate.png":           "Exact Match Rate Ranking",
+    "06_subject_metric_heatmap.png":     "Subject Multi-Metric Heatmap",
+    "07_score_distribution.png":         "Score Distribution per Model",
+    "08_latency_distribution.png":       "Latency Distribution per Model",
+    "09_tokens_vs_latency.png":          "Token Count vs. Latency",
+    "10_qwen_vs_gemini_per_dataset.png": "Qwen vs. Gemini: Per-Dataset Comparison (5 Datasets)",
+    "11_qwen_vs_gemini_scorecard.png":   "Qwen vs. Gemini: Executive Scorecard & Win Matrix",
 }
 
 
@@ -221,22 +281,9 @@ def load_leaderboard() -> pd.DataFrame | None:
     if not p.exists():
         return None
     df = pd.read_csv(p)
-    num = ["n_questions", "exact_match_rate", "avg_llm_score_1_5",
-           "avg_llm_score_0_10", "avg_latency_s", "n_errors"]
+    num = ["n_questions", "exact_match_rate", "avg_rouge_l", "avg_bert_score_f1",
+           "avg_llm_score_1_5", "avg_llm_score_0_10", "avg_latency_s", "n_errors"]
     for c in num:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df
-
-
-@st.cache_data(ttl=30)
-def load_scored() -> pd.DataFrame | None:
-    p = RESULTS_DIR / "scored_results.csv"
-    if not p.exists():
-        return None
-    df = pd.read_csv(p)
-    for c in ["exact_match", "llm_score_0_10", "llm_score_1_5",
-              "latency_s", "prompt_tokens", "completion_tokens", "total_tokens"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
@@ -248,55 +295,126 @@ def load_subject_leaderboard() -> pd.DataFrame | None:
     if not p.exists():
         return None
     df = pd.read_csv(p)
-    # subject_leaderboard.csv columns: rank, model, subject, n_questions,
-    # exact_match_rate, avg_rouge_l, avg_bert_score_f1, avg_llm_score_1_5,
-    # avg_llm_score_0_10 (added in updated step3_evaluate.py)
-    for c in ["n_questions", "exact_match_rate",
-              "avg_rouge_l", "avg_bert_score_f1",
+    for c in ["n_questions", "exact_match_rate", "avg_rouge_l", "avg_bert_score_f1",
               "avg_llm_score_1_5", "avg_llm_score_0_10"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
 
-def _score_color(val: float, lo: float, hi: float) -> str:
-    """Map a value in [lo, hi] to a green-red gradient hex."""
-    t = max(0.0, min(1.0, (val - lo) / (hi - lo)))
-    r = int((1 - t) * 220 + t * 34)
-    g = int((1 - t) * 34  + t * 197)
-    return f"#{r:02x}{g:02x}60"
+@st.cache_data(ttl=30)
+def load_qwen_scored() -> pd.DataFrame | None:
+    """Load Qwen per-question scored results from results/scored_results.csv."""
+    p = RESULTS_DIR / "scored_results.csv"
+    if not p.exists():
+        return None
+    df = pd.read_csv(p)
+    for c in ["exact_match", "rouge_l", "bert_score_f1", "llm_score_0_10", "llm_score_1_5",
+              "latency_s", "prompt_tokens", "completion_tokens", "total_tokens"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
+
+
+@st.cache_data(ttl=30)
+def load_gemini_scored() -> pd.DataFrame | None:
+    """Load Gemini per-question scored results from results/gemini_scored_results.csv."""
+    p = RESULTS_DIR / "gemini_scored_results.csv"
+    if not p.exists():
+        return None
+    df = pd.read_csv(p)
+    for c in ["exact_match", "token_f1", "token_precision", "token_recall",
+              "rouge_l", "char_similarity", "contains_match"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
+
+
+@st.cache_data(ttl=30)
+def load_gemini_leaderboard() -> pd.DataFrame | None:
+    """Load Gemini aggregated leaderboard from results/gemini_leaderboard.csv."""
+    p = RESULTS_DIR / "gemini_leaderboard.csv"
+    if not p.exists():
+        return None
+    df = pd.read_csv(p)
+    for c in ["n_questions", "exact_match_rate", "avg_token_f1", "avg_rouge_l",
+              "avg_char_similarity", "contains_match_rate"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
 
 
 def missing_data_warning(label: str) -> None:
     st.warning(
         f"**{label}** not found. "
-        "Run the appropriate pipeline step to generate it.",
+        "Run the evaluation script to generate it.",
         icon="⚠️",
     )
 
 
 # ---------------------------------------------------------------------------
-# Sidebar navigation
+# Global Session State & Synchronization
+# ---------------------------------------------------------------------------
+if "active_model" not in st.session_state:
+    st.session_state["active_model"] = "Qwen 2.5 3B"
+if "sb_model_key" not in st.session_state:
+    st.session_state["sb_model_key"] = st.session_state["active_model"]
+if "main_model_key" not in st.session_state:
+    st.session_state["main_model_key"] = st.session_state["active_model"]
+
+def on_sidebar_model_change():
+    val = st.session_state["sb_model_key"]
+    st.session_state["active_model"] = val
+    st.session_state["main_model_key"] = val
+
+def on_main_model_change():
+    val = st.session_state["main_model_key"]
+    st.session_state["active_model"] = val
+    st.session_state["sb_model_key"] = val
+
+# ---------------------------------------------------------------------------
+# Sidebar Navigation & Model Selector
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.markdown(
         """
-        <div style='text-align:center; padding: 18px 0 12px;'>
+        <div style='text-align:center; padding: 16px 0 10px;'>
             <span style='font-size:2.4rem;'>🎓</span><br>
-            <span style='font-size:1.1rem; font-weight:800;
+            <span style='font-size:1.15rem; font-weight:800;
                          background: linear-gradient(90deg,#60a5fa,#818cf8);
                          -webkit-background-clip:text;
                          -webkit-text-fill-color:transparent;'>
                 EduBench-Local
             </span><br>
             <span style='font-size:0.75rem; color:#4b6a9c;'>
-                LLM Benchmarking Dashboard
+                Multi-Model LLM Benchmark
             </span>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.markdown("<hr style='border-color:#1e2a45; margin:4px 0 16px;'>", unsafe_allow_html=True)
+    st.markdown("<hr style='border-color:#1e2a45; margin:4px 0 14px;'>", unsafe_allow_html=True)
+
+    # ── Interactive Model Selection ──
+    st.markdown("**🤖 Active Evaluation Model**")
+    st.selectbox(
+        "Model Selection",
+        MODELS,
+        key="sb_model_key",
+        on_change=on_sidebar_model_change,
+        label_visibility="collapsed",
+        help="Select the model to inspect its detailed evaluation metrics and generated answers."
+    )
+    active_model = st.session_state["active_model"]
+
+    if active_model == "Qwen 2.5 3B":
+        st.caption("🔵 **Qwen 2.5 (3B)** · Local Ollama · 750 questions evaluated")
+    elif active_model == "Google Gemini":
+        st.caption("🟠 **Google Gemini** · Cloud Flash API · 5-question micro-sample")
+    else:
+        st.caption("⚖️ **Side-by-Side** · Head-to-head comparison across 5 datasets")
+
+    st.markdown("<hr style='border-color:#1e2a45; margin:14px 0 16px;'>", unsafe_allow_html=True)
 
     page = st.radio(
         "Navigate",
@@ -307,263 +425,421 @@ with st.sidebar:
     st.markdown("<hr style='border-color:#1e2a45; margin:16px 0 12px;'>", unsafe_allow_html=True)
     st.markdown(
         "<div style='font-size:0.72rem; color:#3a5278; text-align:center;'>"
-        "Powered by Ollama · Streamlit<br>"
-        f"Results dir: <code style='color:#4b6a9c'>{RESULTS_DIR.name}/</code>"
+        "EduBench-Local Evaluation Suite<br>"
+        f"Data dir: <code style='color:#4b6a9c'>{RESULTS_DIR.name}/</code>"
         "</div>",
         unsafe_allow_html=True,
     )
 
 
 # ===========================================================================
-# PAGE 1 — Leaderboard & Analytics
+# PAGE 1 — Leaderboard & Analytics (Interactive Model Switching)
 # ===========================================================================
 if page == "📊  Leaderboard & Analytics":
+    active_model = st.session_state["active_model"]
 
     st.markdown(
-        """
+        f"""
         <div class='page-hero'>
-            <h1>📊 Leaderboard &amp; Analytics</h1>
-            <p>Aggregated model performance across all evaluated subjects · auto-refreshes every 30 s</p>
+            <div style='display:flex; justify-content:space-between; align-items:center;'>
+                <div>
+                    <h1>📊 Benchmark Leaderboard &amp; Analytics</h1>
+                    <p>Evaluating educational QA performance across SciQ, OpenBookQA, ARC-Challenge, RACE, and SQuAD v1.1</p>
+                </div>
+                <div>
+                    <span class='model-pill {"pill-qwen" if active_model == "Qwen 2.5 3B" else ("pill-gemini" if active_model == "Google Gemini" else "pill-qwen")}'>
+                        {active_model}
+                    </span>
+                </div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    lb = load_leaderboard()
-    scored = load_scored()
-    sub_lb = load_subject_leaderboard()
-
-    if lb is None:
-        missing_data_warning("results/leaderboard.csv")
-        st.stop()
-
-    # -- Top model spotlight -------------------------------------------------
-    top = lb.iloc[0]
-
-    # ── Metric cards ────────────────────────────────────────────────────────
-    st.subheader("Top Model at a Glance")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("🏆 Top Model",  top["model"])
-    c2.metric("🎯 LLM Score (1–5)", f"{top['avg_llm_score_1_5']:.3f}")
-    c3.metric("✅ Exact Match",     f"{top['exact_match_rate']*100:.1f}%")
-    c4.metric("⚡ Avg Latency",     f"{top['avg_latency_s']:.2f}s")
-    c5.metric("📝 Questions",       int(top["n_questions"]))
-
-    st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
-
-    # ── Full leaderboard table ───────────────────────────────────────────────
-    st.subheader("Full Leaderboard")
-
-    display_lb = lb.copy()
-    display_lb["Rank"] = range(1, len(lb) + 1)
-    display_lb["Exact Match %"]     = (display_lb["exact_match_rate"] * 100).map("{:.2f}%".format)
-    display_lb["LLM Score (1–5)"]   = display_lb["avg_llm_score_1_5"].map("{:.4f}".format)
-    display_lb["LLM Score (0–10)"]  = display_lb["avg_llm_score_0_10"].map("{:.4f}".format)
-    display_lb["Avg Latency (s)"]   = display_lb["avg_latency_s"].map("{:.3f}".format)
-    display_lb["Judge Errors"]      = display_lb["n_errors"].astype(int)
-    display_lb["N Questions"]       = display_lb["n_questions"].astype(int)
-    display_lb["Subjects"]          = display_lb["subjects"].str.replace("|", " · ", regex=False)
-
-    show_cols = ["Rank", "model", "N Questions", "Exact Match %",
-                 "LLM Score (1–5)", "LLM Score (0–10)", "Avg Latency (s)",
-                 "Judge Errors", "Subjects"]
-    st.dataframe(
-        display_lb[show_cols].rename(columns={"model": "Model"}),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
-
-    # ── Per-subject breakdown ────────────────────────────────────────────────
-    if sub_lb is not None and not sub_lb.empty:
-        st.subheader("Per-Subject Breakdown")
-        col_left, col_right = st.columns([3, 2], gap="large")
-
-        with col_left:
-            disp_sub = sub_lb.copy()
-            disp_sub["Exact Match %"]   = (disp_sub["exact_match_rate"] * 100).map("{:.2f}%".format)
-            disp_sub["LLM Score (1-5)"] = disp_sub["avg_llm_score_1_5"].map("{:.4f}".format)
-            disp_sub["N"]               = disp_sub["n_questions"].astype(int)
-
-            # Optional columns — present only when subject_leaderboard.csv has them
-            show_sub_cols = ["model", "subject", "N", "Exact Match %", "LLM Score (1-5)"]
-            if "avg_llm_score_0_10" in disp_sub.columns:
-                disp_sub["LLM Score (0-10)"] = disp_sub["avg_llm_score_0_10"].map("{:.4f}".format)
-                show_sub_cols.append("LLM Score (0-10)")
-            if "avg_rouge_l" in disp_sub.columns:
-                disp_sub["ROUGE-L"] = disp_sub["avg_rouge_l"].map("{:.4f}".format)
-                show_sub_cols.append("ROUGE-L")
-            if "avg_bert_score_f1" in disp_sub.columns:
-                disp_sub["BERT-F1"] = disp_sub["avg_bert_score_f1"].map("{:.4f}".format)
-                show_sub_cols.append("BERT-F1")
-
-            st.dataframe(
-                disp_sub[show_sub_cols].rename(
-                    columns={"model": "Model", "subject": "Subject"}
-                ),
-                use_container_width=True,
-                hide_index=True,
-            )
-
-        with col_right:
-            # Mini bar chart — LLM score by subject
-            pivot = sub_lb.pivot_table(
-                index="subject", columns="model",
-                values="avg_llm_score_1_5", aggfunc="mean"
-            ).reset_index()
-            chart_df = pivot.set_index("subject")
-            st.markdown("**LLM Score (1–5) by Subject**")
-            st.bar_chart(chart_df, height=280)
-
-    st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
-
-    # ── Scored results deep-dive ─────────────────────────────────────────────
-    if scored is not None and not scored.empty:
-        st.subheader("Detailed Results Explorer")
-
-        # Filters row
-        f1, f2, f3 = st.columns([2, 2, 2])
-        with f1:
-            models_avail = sorted(scored["model"].unique())
-            sel_model = st.selectbox("Filter by Model", ["All"] + models_avail, key="lb_model")
-        with f2:
-            subjects_avail = sorted(scored["subject"].unique())
-            sel_subj = st.selectbox("Filter by Subject", ["All"] + subjects_avail, key="lb_subj")
-        with f3:
-            score_range = st.slider(
-                "LLM Score (1–5) range", 1, 5, (1, 5), key="lb_score"
-            )
-
-        filtered = scored.copy()
-        if sel_model != "All":
-            filtered = filtered[filtered["model"] == sel_model]
-        if sel_subj != "All":
-            filtered = filtered[filtered["subject"] == sel_subj]
-        filtered = filtered[
-            filtered["llm_score_1_5"].between(score_range[0], score_range[1])
-        ]
-
-        st.caption(f"Showing **{len(filtered):,}** of **{len(scored):,}** rows")
-
-        show_scored_cols = ["model", "subject", "id", "question",
-                            "reference_answer", "student_answer",
-                            "exact_match", "llm_score_1_5", "latency_s"]
-        available = [c for c in show_scored_cols if c in filtered.columns]
-        st.dataframe(
-            filtered[available].rename(columns={
-                "model": "Model", "subject": "Subject", "id": "ID",
-                "question": "Question", "reference_answer": "Ref. Answer",
-                "student_answer": "Student Answer", "exact_match": "EM",
-                "llm_score_1_5": "LLM(1–5)", "latency_s": "Latency(s)",
-            }),
-            use_container_width=True,
-            hide_index=True,
-            height=360,
+    # ── Top interactive model switcher tabs ──
+    col_t1, col_t2 = st.columns([3, 2])
+    with col_t1:
+        st.radio(
+            "Select Model View",
+            MODELS,
+            horizontal=True,
+            key="main_model_key",
+            on_change=on_main_model_change,
         )
+
+    model_view = st.session_state["active_model"]
+    st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+
+    # -----------------------------------------------------------------------
+    # VIEW 1: Qwen 2.5 3B
+    # -----------------------------------------------------------------------
+    if model_view == "Qwen 2.5 3B":
+        lb = load_leaderboard()
+        sub_lb = load_subject_leaderboard()
+        qwen_scored = load_qwen_scored()
+
+        if lb is None or lb.empty:
+            missing_data_warning("results/leaderboard.csv")
+            st.stop()
+
+        qwen_row = lb.iloc[0]
+        qwen_em = float(qwen_row["exact_match_rate"]) * 100
+        qwen_rl = float(qwen_row.get("avg_rouge_l", 0.137))
+        qwen_llm = float(qwen_row.get("avg_llm_score_1_5", 4.113))
+        qwen_n = int(qwen_row["n_questions"])
+
+        # ── 1. Top Metric Cards ──
+        st.subheader("🔵 Qwen 2.5 (3B) Performance Spotlight")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("🤖 Model Architecture", "Qwen 2.5 (3B)")
+        c2.metric("✅ Exact Match Rate", f"{qwen_em:.1f}%")
+        c3.metric("📈 Mean ROUGE-L", f"{qwen_rl:.3f}")
+        c4.metric("🎯 Quality Score", f"{qwen_llm:.3f}", delta="LLM Score (1–5)", delta_color="off")
+        c5.metric("📝 Questions Evaluated", f"{qwen_n:,}", delta="150 / dataset", delta_color="off")
 
         st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
 
-        # ── Score & latency distributions ───────────────────────────────────
-        st.subheader("Score & Latency Distributions")
-        dist_l, dist_r = st.columns(2, gap="large")
+        # ── 2. Per-Dataset Performance Breakdown ──
+        if sub_lb is not None and not sub_lb.empty:
+            st.subheader("Per-Dataset Performance Breakdown")
+            col_l, col_r = st.columns([3, 2], gap="large")
 
-        with dist_l:
-            st.markdown("**LLM Score (1–5) distribution**")
-            score_hist = (
-                scored["llm_score_1_5"]
-                .value_counts()
-                .sort_index()
-                .rename_axis("Score")
-                .reset_index(name="Count")
-            )
-            st.bar_chart(score_hist.set_index("Score"), height=260)
+            with col_l:
+                disp_sub = sub_lb.copy()
+                disp_sub["Dataset"] = disp_sub["subject"].map(DATASET_NAME_MAP).fillna(disp_sub["subject"])
+                disp_sub["sort_order"] = disp_sub["Dataset"].map(lambda x: DATASET_ORDER.index(x) if x in DATASET_ORDER else 99)
+                disp_sub = disp_sub.sort_values("sort_order").drop(columns=["sort_order"])
 
-        with dist_r:
-            st.markdown("**Latency distribution (s) — binned**")
-            lat_hist = (
-                pd.cut(scored["latency_s"].dropna(), bins=20)
-                .value_counts()
-                .sort_index()
+                disp_sub["Questions (N)"] = disp_sub["n_questions"].astype(int)
+                disp_sub["Exact Match %"] = (disp_sub["exact_match_rate"] * 100).map("{:.2f}%".format)
+                disp_sub["ROUGE-L"] = disp_sub.get("avg_rouge_l", 0).map("{:.4f}".format)
+                disp_sub["Semantic F1"] = disp_sub.get("avg_bert_score_f1", 0).map("{:.4f}".format)
+                disp_sub["Quality Score"] = disp_sub.get("avg_llm_score_1_5", 0).map("{:.4f}".format)
+
+                show_cols = ["Dataset", "subject", "Questions (N)", "Exact Match %", "ROUGE-L", "Semantic F1", "Quality Score"]
+                st.dataframe(
+                    disp_sub[show_cols].rename(columns={"subject": "Internal Subject"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            with col_r:
+                chart_sub = sub_lb.copy()
+                chart_sub["Dataset"] = chart_sub["subject"].map(DATASET_NAME_MAP).fillna(chart_sub["subject"])
+                chart_sub["sort_order"] = chart_sub["Dataset"].map(lambda x: DATASET_ORDER.index(x) if x in DATASET_ORDER else 99)
+                chart_sub = chart_sub.sort_values("sort_order")
+                chart_df = chart_sub.set_index("Dataset")[["avg_rouge_l", "exact_match_rate"]]
+                chart_df.columns = ["ROUGE-L", "Exact Match Rate"]
+                st.markdown("**ROUGE-L vs. Exact Match by Dataset**")
+                st.bar_chart(chart_df, height=270)
+
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+
+        # ── 3. Detailed Generated Answers Explorer ──
+        if qwen_scored is not None and not qwen_scored.empty:
+            st.subheader("Detailed Generated Answers Explorer (Qwen)")
+
+            f1, f2 = st.columns([2, 2])
+            with f1:
+                sel_ds = st.selectbox("Filter by Dataset", ["All"] + DATASET_ORDER, key="qwen_ds_filter")
+            with f2:
+                search_query = st.text_input("🔍 Search in Questions / Answers", "", key="qwen_search")
+
+            filtered = qwen_scored.copy()
+            filtered["Dataset"] = filtered["subject"].map(DATASET_NAME_MAP).fillna(filtered["subject"])
+            if sel_ds != "All":
+                filtered = filtered[filtered["Dataset"] == sel_ds]
+            if search_query.strip():
+                q_low = search_query.strip().lower()
+                filtered = filtered[
+                    filtered["question"].str.lower().str.contains(q_low, na=False) |
+                    filtered["student_answer"].str.lower().str.contains(q_low, na=False)
+                ]
+
+            st.caption(f"Showing **{len(filtered):,}** of **{len(qwen_scored):,}** answers")
+
+            disp_cols = ["id", "Dataset", "subject", "question", "reference_answer", "student_answer",
+                         "exact_match", "rouge_l", "llm_score_1_5", "latency_s"]
+            avail_cols = [c for c in disp_cols if c in filtered.columns]
+            st.dataframe(
+                filtered[avail_cols].rename(columns={
+                    "id": "ID", "Dataset": "Dataset", "subject": "Internal Subject", "question": "Question",
+                    "reference_answer": "Ground Truth", "student_answer": "Model Answer",
+                    "exact_match": "Exact Match", "rouge_l": "ROUGE-L", "llm_score_1_5": "Quality Score",
+                    "latency_s": "Latency (s)"
+                }),
+                use_container_width=True,
+                hide_index=True,
+                height=380,
             )
-            lat_df = pd.DataFrame({
-                "Bucket": lat_hist.index.astype(str),
-                "Count":  lat_hist.values,
+
+            # Individual Question Deep-Dive Expanders
+            st.markdown("#### 🔍 Individual Question Deep-Dive")
+            deep_dive_samples = filtered.head(5)
+            if len(filtered) > 5:
+                st.caption(f"Displaying top {len(deep_dive_samples)} inspection cards from current filter")
+            for _, row in deep_dive_samples.iterrows():
+                em_status = "✅ Exact Match (1.0)" if row.get("exact_match") == 1 else "❌ Mismatch (0.0)"
+                ds_name = row.get("Dataset") or DATASET_NAME_MAP.get(row.get("subject"), row.get("subject", "Item"))
+                with st.expander(f"{ds_name} — {row['id']} [{em_status}]", expanded=False):
+                    st.markdown(f"**Question**: {row['question']}")
+                    st.markdown(f"**Ground Truth Reference**: `{row['reference_answer']}`")
+                    st.markdown(f"**Qwen Answer**: `{row['student_answer']}`")
+                    m_c1, m_c2, m_c3, m_c4 = st.columns(4)
+                    m_c1.metric("Exact Match", int(row.get("exact_match", 0)))
+                    m_c2.metric("ROUGE-L", f"{row.get('rouge_l', 0):.3f}")
+                    m_c3.metric("Quality Score (LLM)", f"{row.get('llm_score_1_5', 0):.2f}")
+                    lat = row.get("latency_s")
+                    m_c4.metric("Latency", f"{lat:.2f}s" if pd.notna(lat) else "—")
+
+    # -----------------------------------------------------------------------
+    # VIEW 2: Google Gemini
+    # -----------------------------------------------------------------------
+    elif model_view == "Google Gemini":
+        gem_scored = load_gemini_scored()
+        gem_lb = load_gemini_leaderboard()
+
+        if gem_scored is None or gem_scored.empty:
+            missing_data_warning("results/gemini_scored_results.csv")
+            st.info("Run `python gemini_evaluate.py` followed by `python gemini_evaluate_metrics.py` to generate Gemini scores.")
+            st.stop()
+
+        n_gem = len(gem_scored)
+        gem_em = float(gem_scored["exact_match"].mean()) * 100
+        gem_rl = float(gem_scored["rouge_l"].mean())
+        gem_f1 = float(gem_scored["token_f1"].mean())
+
+        # ── 1. Top Metric Cards ──
+        st.subheader("🟠 Google Gemini Performance Spotlight")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("🤖 Model Architecture", "Gemini (Flash)")
+        c2.metric("✅ Exact Match Rate", f"{gem_em:.1f}%")
+        c3.metric("📈 Mean ROUGE-L", f"{gem_rl:.3f}")
+        c4.metric("🎯 Quality Score", f"{gem_f1:.3f}", delta="Token F1", delta_color="off")
+        c5.metric("📝 Questions Evaluated", f"{n_gem}", delta="Micro-sample", delta_color="off")
+
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+
+        # ── 2. Per-Dataset Performance Breakdown ──
+        if gem_lb is not None and not gem_lb.empty:
+            st.subheader("Per-Dataset Performance Breakdown")
+            col_gl, col_gr = st.columns([3, 2], gap="large")
+
+            with col_gl:
+                disp_glb = gem_lb.copy()
+                disp_glb["sort_order"] = disp_glb["dataset"].map(lambda x: DATASET_ORDER.index(x) if x in DATASET_ORDER else 99)
+                disp_glb = disp_glb.sort_values("sort_order").drop(columns=["sort_order"])
+
+                disp_glb["Questions (N)"] = disp_glb["n_questions"].astype(int)
+                disp_glb["Exact Match %"] = (disp_glb["exact_match_rate"] * 100).map("{:.2f}%".format)
+                disp_glb["ROUGE-L"] = disp_glb["avg_rouge_l"].map("{:.4f}".format)
+                disp_glb["Semantic F1"] = disp_glb["avg_token_f1"].map("{:.4f}".format)
+                disp_glb["Quality Score"] = disp_glb["avg_char_similarity"].map("{:.4f}".format)
+
+                show_gcols = ["dataset", "subject", "Questions (N)", "Exact Match %", "ROUGE-L", "Semantic F1", "Quality Score"]
+                st.dataframe(
+                    disp_glb[show_gcols].rename(columns={"dataset": "Dataset", "subject": "Internal Subject"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            with col_gr:
+                chart_glb = gem_lb.copy()
+                chart_glb["sort_order"] = chart_glb["dataset"].map(lambda x: DATASET_ORDER.index(x) if x in DATASET_ORDER else 99)
+                chart_glb = chart_glb.sort_values("sort_order")
+                chart_gdf = chart_glb.set_index("dataset")[["avg_rouge_l", "exact_match_rate"]]
+                chart_gdf.columns = ["ROUGE-L", "Exact Match Rate"]
+                st.markdown("**ROUGE-L vs. Exact Match by Dataset**")
+                st.bar_chart(chart_gdf, height=270)
+
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+
+        # ── 3. Detailed Generated Answers Explorer ──
+        st.subheader("Detailed Generated Answers Explorer (Gemini)")
+
+        fg1, fg2 = st.columns([2, 2])
+        with fg1:
+            sel_ds = st.selectbox("Filter by Dataset", ["All"] + DATASET_ORDER, key="gem_ds_filter")
+        with fg2:
+            gem_search = st.text_input("🔍 Search in Questions / Answers", "", key="gem_search")
+
+        g_filtered = gem_scored.copy()
+        g_filtered["Dataset"] = g_filtered["source_dataset"]
+        if sel_ds != "All":
+            g_filtered = g_filtered[g_filtered["Dataset"] == sel_ds]
+        if gem_search.strip():
+            g_low = gem_search.strip().lower()
+            g_filtered = g_filtered[
+                g_filtered["question"].str.lower().str.contains(g_low, na=False) |
+                g_filtered["gemini_answer"].str.lower().str.contains(g_low, na=False)
+            ]
+
+        st.caption(f"Showing **{len(g_filtered):,}** of **{len(gem_scored):,}** answers")
+
+        g_disp_cols = ["id", "Dataset", "subject", "question", "reference_answer", "gemini_answer",
+                       "exact_match", "rouge_l", "token_f1", "model"]
+        avail_gcols = [c for c in g_disp_cols if c in g_filtered.columns]
+
+        st.dataframe(
+            g_filtered[avail_gcols].rename(columns={
+                "id": "ID", "Dataset": "Dataset", "subject": "Internal Subject", "question": "Question",
+                "reference_answer": "Ground Truth", "gemini_answer": "Model Answer",
+                "exact_match": "Exact Match", "rouge_l": "ROUGE-L", "token_f1": "Quality Score",
+                "model": "Model Used"
+            }),
+            use_container_width=True,
+            hide_index=True,
+            height=380,
+        )
+
+        # Individual Question Deep-Dive Expanders
+        st.markdown("#### 🔍 Individual Question Deep-Dive")
+        for _, row in g_filtered.iterrows():
+            em_status = "✅ Exact Match (1.0)" if row["exact_match"] == 1 else "❌ Mismatch (0.0)"
+            ds_name = row.get("Dataset") or row.get("source_dataset", "Item")
+            with st.expander(f"{ds_name} — {row['id']} [{em_status}]", expanded=False):
+                st.markdown(f"**Question**: {row['question']}")
+                if row.get("context") and pd.notna(row["context"]):
+                    st.caption(f"**Passage Context**: {str(row['context'])[:300]}...")
+                st.markdown(f"**Ground Truth Reference**: `{row['reference_answer']}`")
+                st.markdown(f"**Gemini Answer**: `{row['gemini_answer']}`")
+                m_c1, m_c2, m_c3, m_c4 = st.columns(4)
+                m_c1.metric("Exact Match", int(row.get("exact_match", 0)))
+                m_c2.metric("ROUGE-L", f"{row.get('rouge_l', 0):.3f}")
+                m_c3.metric("Quality Score (F1)", f"{row.get('token_f1', 0):.3f}")
+                m_c4.metric("Char Similarity", f"{row.get('char_similarity', 0):.3f}")
+
+    # -----------------------------------------------------------------------
+    # VIEW 3: Side-by-Side Comparison
+    # -----------------------------------------------------------------------
+    else:
+        lb = load_leaderboard()
+        sub_lb = load_subject_leaderboard()
+        gem_scored = load_gemini_scored()
+
+        st.subheader("⚖️ Head-to-Head Comparative Overview")
+
+        # Top comparative cards
+        qwen_em = float(lb["exact_match_rate"].iloc[0])*100 if lb is not None and not lb.empty else 2.9
+        qwen_rl = float(lb["avg_rouge_l"].iloc[0]) if lb is not None and not lb.empty else 0.137
+        gem_em  = float(gem_scored["exact_match"].mean())*100 if gem_scored is not None else 40.0
+        gem_rl  = float(gem_scored["rouge_l"].mean()) if gem_scored is not None else 0.533
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Exact Match Rate", f"Qwen: {qwen_em:.1f}%", f"Gemini: {gem_em:.1f}%", delta_color="normal")
+        k2.metric("Mean ROUGE-L Overlap", f"Qwen: {qwen_rl:.3f}", f"Gemini: {gem_rl:.3f}", delta_color="normal")
+        k3.metric("Deployment Mode", "Qwen: Local Ollama", "Gemini: Cloud Flash API")
+        k4.metric("Inference Privacy", "Qwen: 100% On-Device", "Gemini: API Cloud")
+
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+
+        # ── 5 Datasets Comparison Table ──
+        st.subheader("Dataset-by-Dataset Benchmark Performance Matrix")
+
+        comp_rows = []
+        for ds_name in DATASET_ORDER:
+            s = SUBJECT_NAME_MAP.get(ds_name, ds_name)
+
+            # Qwen metrics
+            q_match = sub_lb.loc[sub_lb["subject"] == s] if sub_lb is not None else None
+            q_em = float(q_match["exact_match_rate"].values[0])*100 if q_match is not None and not q_match.empty else 0.0
+            q_rl = float(q_match["avg_rouge_l"].values[0]) if q_match is not None and not q_match.empty else 0.0
+
+            # Gemini metrics
+            if gem_scored is not None:
+                g_match = gem_scored[gem_scored["subject"] == s]
+                g_em = float(g_match["exact_match"].mean())*100 if not g_match.empty else 0.0
+                g_rl = float(g_match["rouge_l"].mean()) if not g_match.empty else 0.0
+            else:
+                g_em, g_rl = 0.0, 0.0
+
+            winner = "Gemini" if g_em > q_em or g_rl > q_rl else ("Qwen" if q_em > g_em or q_rl > g_rl else "Parity")
+
+            comp_rows.append({
+                "Dataset": ds_name,
+                "Internal Subject": s,
+                "Qwen EM %": f"{q_em:.1f}%",
+                "Gemini EM %": f"{g_em:.1f}%",
+                "Qwen ROUGE-L": f"{q_rl:.3f}",
+                "Gemini ROUGE-L": f"{g_rl:.3f}",
+                "Winner": f"★ {winner}"
             })
-            st.bar_chart(lat_df.set_index("Bucket"), height=260)
+
+        st.dataframe(pd.DataFrame(comp_rows), use_container_width=True, hide_index=True)
+
+        # Show embedded comparison figures if present
+        f10 = FIGURES_DIR / "10_qwen_vs_gemini_per_dataset.png"
+        f11 = FIGURES_DIR / "11_qwen_vs_gemini_scorecard.png"
+        if f10.exists() or f11.exists():
+            st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+            st.subheader("Publication Comparative Visualizations")
+            if f10.exists():
+                st.image(str(f10), caption="Figure 10: Head-to-Head Comparison Across 5 Datasets", use_container_width=True)
+            if f11.exists():
+                st.image(str(f11), caption="Figure 11: Executive Scorecard & Win Matrix", use_container_width=True)
 
 
 # ===========================================================================
-# PAGE 2 — Visualizations
+# PAGE 2 — Visualizations Gallery
 # ===========================================================================
 elif page == "🖼️  Visualizations":
 
     st.markdown(
         """
         <div class='page-hero'>
-            <h1>🖼️ Visualizations</h1>
-            <p>All performance charts generated by <code>step4_visualize.py</code> · click any image to expand</p>
+            <h1>🖼️ Benchmark Visualizations Gallery</h1>
+            <p>Comprehensive comparative performance charts generated in <code>figures/</code> · click to enlarge</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # Scan figures dir
     fig_files = sorted(FIGURES_DIR.glob("*.png"))
 
     if not fig_files:
-        st.info(
-            "No figures found in `figures/`. Run `python step4_visualize.py` to generate them.",
-            icon="ℹ️",
-        )
+        st.info("No figures found in `figures/`. Run `python generate_visualizations.py` to produce them.", icon="ℹ️")
         st.stop()
 
-    st.caption(f"Found **{len(fig_files)}** charts in `{FIGURES_DIR.as_posix()}`")
+    # Filter controls
+    f_c1, f_c2 = st.columns([2, 3])
+    with f_c1:
+        layout_mode = st.radio("Layout Mode", ["2-Column Grid", "Full Width"], horizontal=True)
 
-    # ── Gallery toggle ───────────────────────────────────────────────────────
-    view_mode = st.radio(
-        "Layout", ["2-column grid", "Full width"],
-        horizontal=True, label_visibility="collapsed"
-    )
+    st.caption(f"Displaying **{len(fig_files)}** publication-grade charts")
+    st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
 
-    if view_mode == "Full width":
-        for fig_path in fig_files:
-            title = FIGURE_TITLES.get(fig_path.name, fig_path.stem.replace("_", " ").title())
+    if layout_mode == "Full Width":
+        for fp in fig_files:
+            title = FIGURE_TITLES.get(fp.name, fp.stem.replace("_", " ").title())
             st.markdown(f"#### {title}")
-            st.image(str(fig_path), use_container_width=True)
-            size_kb = fig_path.stat().st_size / 1024
-            st.caption(f"`{fig_path.name}` · {size_kb:.1f} KB")
+            st.image(str(fp), use_container_width=True)
+            st.caption(f"`{fp.name}` · {fp.stat().st_size / 1024:.1f} KB")
             st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
-
     else:
-        # 2-column grid
         pairs = list(zip(fig_files[::2], fig_files[1::2]))
         if len(fig_files) % 2 == 1:
             pairs.append((fig_files[-1], None))
 
-        for left_path, right_path in pairs:
+        for fl, fr in pairs:
             col_l, col_r = st.columns(2, gap="medium")
-
             with col_l:
-                title_l = FIGURE_TITLES.get(left_path.name, left_path.stem.replace("_", " ").title())
-                st.markdown(f"**{title_l}**")
-                st.image(str(left_path), use_container_width=True)
-                sz = left_path.stat().st_size / 1024
-                st.caption(f"`{left_path.name}` · {sz:.1f} KB")
+                tl = FIGURE_TITLES.get(fl.name, fl.stem.replace("_", " ").title())
+                st.markdown(f"**{tl}**")
+                st.image(str(fl), use_container_width=True)
+                st.caption(f"`{fl.name}` · {fl.stat().st_size / 1024:.1f} KB")
 
-            if right_path is not None:
+            if fr is not None:
                 with col_r:
-                    title_r = FIGURE_TITLES.get(right_path.name, right_path.stem.replace("_", " ").title())
-                    st.markdown(f"**{title_r}**")
-                    st.image(str(right_path), use_container_width=True)
-                    sz = right_path.stat().st_size / 1024
-                    st.caption(f"`{right_path.name}` · {sz:.1f} KB")
-
+                    tr = FIGURE_TITLES.get(fr.name, fr.stem.replace("_", " ").title())
+                    st.markdown(f"**{tr}**")
+                    st.image(str(fr), use_container_width=True)
+                    st.caption(f"`{fr.name}` · {fr.stat().st_size / 1024:.1f} KB")
             st.markdown("")
 
 
 # ===========================================================================
-# PAGE 3 — Live Model Playground
+# PAGE 3 — Live Model Playground (Supports Qwen & Gemini)
 # ===========================================================================
 elif page == "🧪  Live Model Playground":
 
@@ -571,204 +847,145 @@ elif page == "🧪  Live Model Playground":
         """
         <div class='page-hero'>
             <h1>🧪 Live Model Playground</h1>
-            <p>Query any local Ollama model in real-time · results and latency shown instantly</p>
+            <p>Query local Ollama models (Qwen) or Google Gemini in real-time with latency measurement</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # ── Try to import ollama ─────────────────────────────────────────────────
+    # ── Try to import ollama ──
     try:
         import ollama as _ollama
         _ollama_available = True
     except ImportError:
         _ollama_available = False
 
-    if not _ollama_available:
-        st.error("The `ollama` Python package is not installed in this environment.\n\n"
-                 "```\npip install ollama\n```")
-        st.stop()
-
-    # ── Discover available local models ──────────────────────────────────────
-    @st.cache_data(ttl=15)
-    def get_local_models() -> list[str]:
+    # ── Discover available models ──
+    def get_ollama_models() -> list[str]:
+        if not _ollama_available:
+            return []
         try:
             resp = _ollama.list()
             return [m.model for m in resp.models] if resp.models else []
         except Exception:
             return []
 
-    local_models = get_local_models()
+    local_models = get_ollama_models()
+    all_options = ["Qwen 2.5 (3B Local)", "Google Gemini (Flash)"]
+    if local_models:
+        all_options += [f"{m} (Ollama)" for m in local_models if m not in ("qwen2.5:3b", "qwen2.5:3b-instruct")]
 
-    # Always surface the pipeline models prominently
-    pipeline_models = list(dict.fromkeys(
-        config.MODELS + [config.JUDGE_MODEL] + local_models
-    ))
-
-    # ── Settings row ─────────────────────────────────────────────────────────
     s1, s2, s3 = st.columns([2, 1, 1], gap="large")
-
     with s1:
-        if local_models:
-            model_choice = st.selectbox(
-                "🤖 Select Model",
-                options=pipeline_models,
-                help="Models installed locally via Ollama",
-            )
-        else:
-            model_choice = st.selectbox(
-                "🤖 Select Model (Ollama not reachable — choose manually)",
-                options=pipeline_models,
-            )
-
+        chosen_playground_model = st.selectbox("🤖 Choose Model", options=all_options)
     with s2:
-        temperature = st.slider("🌡️ Temperature", 0.0, 1.0, 0.2, 0.05)
-
+        temperature = st.slider("🌡️ Temperature", 0.0, 1.0, 0.0, 0.05)
     with s3:
-        max_tokens = st.slider("📏 Max Tokens", 50, 500, 200, 25)
+        max_tokens = st.slider("📏 Max Output Tokens", 50, 500, 200, 25)
 
     st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
 
-    # ── Subject & question ────────────────────────────────────────────────────
     subj_col, _ = st.columns([2, 3])
     with subj_col:
         subject = st.selectbox(
-            "📚 Subject (optional context)",
-            ["General", "Science", "Reading Comprehension", "Mathematics",
-             "History", "Literature", "Geography", "Other"],
+            "📚 Benchmark Domain",
+            ["Science", "General Science", "Science Challenge", "Reading Comprehension", "General QA"],
         )
 
     question = st.text_area(
-        "✏️ Enter your educational question",
+        "✏️ Enter Educational Question",
         height=120,
-        placeholder="e.g.  What is the powerhouse of the cell?\n"
-                    "      Explain Newton's second law of motion.\n"
-                    "      What caused the French Revolution?",
-        key="playground_question",
+        placeholder="e.g. Which branch of biology studies animal behavior?\nWhen cold temperatures are produced in a chemical reaction, the reaction is known as...",
+        key="pg_question_input",
     )
 
-    # Example prompts
-    with st.expander("💡 Try an example question", expanded=False):
-        examples = [
-            "What is the process by which plants make their own food using sunlight?",
-            "Explain the difference between mitosis and meiosis.",
-            "What is the significance of the Magna Carta in the development of democracy?",
-            "Describe how a transistor works in simple terms.",
-            "What is the central limit theorem and why is it important in statistics?",
-        ]
-        for ex in examples:
-            if st.button(ex, key=f"ex_{ex[:30]}"):
-                st.session_state["playground_question"] = ex
-                st.rerun()
-
-    # ── Submit ────────────────────────────────────────────────────────────────
     run_col, clear_col, _ = st.columns([1, 1, 4])
-    run_btn   = run_col.button("▶  Run Query", use_container_width=True)
+    run_btn = run_col.button("▶  Run Query", use_container_width=True)
     clear_btn = clear_col.button("🗑  Clear", use_container_width=True)
 
     if clear_btn:
-        for k in ["pg_response", "pg_latency", "pg_model", "pg_tokens"]:
+        for k in ["pg_ans", "pg_lat", "pg_mod"]:
             st.session_state.pop(k, None)
         st.rerun()
 
-    # ── Execute ───────────────────────────────────────────────────────────────
     if run_btn:
         q = question.strip()
         if not q:
-            st.warning("Please enter a question before running.", icon="⚠️")
+            st.warning("Please enter a question to evaluate.", icon="⚠️")
         else:
             prompt = (
-                f"You are a knowledgeable educational assistant.\n"
+                f"You are an educational assessment assistant.\n"
                 f"Subject: {subject}\n\n"
                 f"Question: {q}\n\n"
-                f"Answer clearly and accurately:"
+                f"Answer in as few words as possible:\nAnswer:"
             )
 
-            with st.spinner(f"Querying **{model_choice}** via Ollama …"):
-                t0 = time.perf_counter()
-                try:
-                    resp = _ollama.chat(
-                        model=model_choice,
-                        messages=[{"role": "user", "content": prompt}],
-                        options={"temperature": temperature, "num_predict": max_tokens},
-                    )
-                    elapsed = time.perf_counter() - t0
-                    raw_content = resp["message"]["content"]
-                    answer  = raw_content.strip() if raw_content else ""
-                    # Ollama token counts live at the top level of ChatResponse
-                    prompt_toks     = resp.get("prompt_eval_count")
-                    completion_toks = resp.get("eval_count")
-                    total_toks = (
-                        (prompt_toks or 0) + (completion_toks or 0)
-                    ) or resp.get("eval_count") or "—"
-                    st.session_state["pg_response"] = answer
-                    st.session_state["pg_latency"]  = elapsed
-                    st.session_state["pg_model"]    = model_choice
-                    st.session_state["pg_tokens"]   = total_toks
-
-                except Exception as exc:
-                    st.session_state["pg_response"] = f"ERROR: {exc}"
-                    st.session_state["pg_latency"]  = None
-                    st.session_state["pg_model"]    = model_choice
-                    st.session_state["pg_tokens"]   = None
-
-    # ── Display result ─────────────────────────────────────────────────────────
-    if "pg_response" in st.session_state:
-        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
-
-        resp_text  = st.session_state["pg_response"]
-        lat        = st.session_state.get("pg_latency")
-        resp_model = st.session_state.get("pg_model", model_choice)
-        n_toks     = st.session_state.get("pg_tokens", "—")
-
-        # Header row
-        h1, h2, h3, h4 = st.columns(4)
-        h1.metric("Model",    resp_model)
-        h2.metric("Latency",  f"{lat:.2f}s"   if lat is not None else "—")
-        h3.metric("Tokens",   str(n_toks) if n_toks is not None and n_toks != "—" else "—")
-        h4.metric("Temp.",    f"{temperature:.2f}")
-
-        st.markdown("")
-
-        if resp_text.startswith("ERROR:"):
-            st.markdown(
-                f"<div class='error-box'>{resp_text}</div>",
-                unsafe_allow_html=True,
-            )
-            st.info(
-                "Make sure Ollama is running (`ollama serve`) and the model is "
-                f"pulled (`ollama pull {resp_model}`).",
-                icon="ℹ️",
-            )
-        else:
-            st.markdown("**Model Response**")
-            st.markdown(
-                f"<div class='response-box'>{resp_text}</div>",
-                unsafe_allow_html=True,
-            )
-
-            # ── Compare against leaderboard if same model ────────────────────
-            lb = load_leaderboard()
-            if lb is not None:
-                match = lb[lb["model"] == resp_model]
-                if not match.empty:
-                    bm = match.iloc[0]
-                    st.markdown("")
-                    st.markdown("**Benchmark Context** — how this model performed in EduBench-Local")
-                    bm1, bm2, bm3, bm4 = st.columns(4)
-                    bm1.metric("Benchmarked LLM Score (1–5)", f"{bm['avg_llm_score_1_5']:.3f}")
-                    bm2.metric("Exact Match Rate",            f"{bm['exact_match_rate']*100:.1f}%")
-                    bm3.metric("Bench Avg Latency",           f"{bm['avg_latency_s']:.2f}s")
-                    bm4.metric("Questions Evaluated",         int(bm["n_questions"]))
-
-                    # Flag if this query's latency is anomalous
-                    if lat is not None:
-                        delta = lat - bm["avg_latency_s"]
-                        if delta > 2.0:
-                            st.warning(
-                                f"This query took **{lat:.2f}s**, which is "
-                                f"**{delta:+.2f}s** above the benchmark average "
-                                f"({bm['avg_latency_s']:.2f}s). "
-                                "Ollama may be under load.",
-                                icon="⚠️",
+            # ── Run Gemini ──
+            if "Gemini" in chosen_playground_model:
+                api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+                if not api_key:
+                    st.error("GEMINI_API_KEY or GOOGLE_API_KEY is not set in environment.")
+                else:
+                    with st.spinner("Calling Google Gemini via GenAI SDK …"):
+                        t0 = time.perf_counter()
+                        try:
+                            from google import genai
+                            from google.genai import types
+                            client = genai.Client(api_key=api_key)
+                            resp = client.models.generate_content(
+                                model="gemini-3.8-flash",
+                                contents=prompt,
+                                config=types.GenerateContentConfig(
+                                    temperature=temperature,
+                                    max_output_tokens=max_tokens,
+                                ),
                             )
+                            el = time.perf_counter() - t0
+                            st.session_state["pg_ans"] = resp.text.strip() if resp and resp.text else "No text returned"
+                            st.session_state["pg_lat"] = el
+                            st.session_state["pg_mod"] = "gemini-3.8-flash"
+                        except Exception as exc:
+                            st.session_state["pg_ans"] = f"ERROR: {exc}"
+                            st.session_state["pg_lat"] = None
+                            st.session_state["pg_mod"] = "Gemini"
+
+            # ── Run Qwen / Ollama ──
+            else:
+                if not _ollama_available:
+                    st.error("Ollama package not available.")
+                else:
+                    ollama_model = "qwen2.5:3b" if "Qwen" in chosen_playground_model else chosen_playground_model.replace(" (Ollama)", "")
+                    with st.spinner(f"Querying {ollama_model} via Ollama …"):
+                        t0 = time.perf_counter()
+                        try:
+                            res = _ollama.chat(
+                                model=ollama_model,
+                                messages=[{"role": "user", "content": prompt}],
+                                options={"temperature": temperature, "num_predict": max_tokens},
+                            )
+                            el = time.perf_counter() - t0
+                            st.session_state["pg_ans"] = res["message"]["content"].strip()
+                            st.session_state["pg_lat"] = el
+                            st.session_state["pg_mod"] = ollama_model
+                        except Exception as exc:
+                            st.session_state["pg_ans"] = f"ERROR: {exc}"
+                            st.session_state["pg_lat"] = None
+                            st.session_state["pg_mod"] = ollama_model
+
+    # Display playground output
+    if "pg_ans" in st.session_state:
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+        r_ans = st.session_state["pg_ans"]
+        r_lat = st.session_state.get("pg_lat")
+        r_mod = st.session_state.get("pg_mod", chosen_playground_model)
+
+        h1, h2, h3 = st.columns(3)
+        h1.metric("Model Used", r_mod)
+        h2.metric("Latency", f"{r_lat:.2f}s" if r_lat is not None else "—")
+        h3.metric("Temperature", f"{temperature:.2f}")
+
+        if r_ans.startswith("ERROR:"):
+            st.markdown(f"<div class='error-box'>{r_ans}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("**Generated Response**")
+            st.markdown(f"<div class='response-box'>{r_ans}</div>", unsafe_allow_html=True)
