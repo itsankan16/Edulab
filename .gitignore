@@ -36,9 +36,6 @@ desktop.ini
 results/raw_answers.json
 results/scored_results.csv
 
-# Figures generated at runtime (reproducible via step4_visualize.py)
-figures/
-
 # Logs
 *.log
 logs/

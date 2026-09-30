@@ -8,7 +8,7 @@ across the 5 benchmark datasets (SciQ, OpenBookQA, ARC-Challenge, RACE, and SQuA
 Outputs figures into the figures/ directory.
 """
 
-from step4_visualize import main
+from generate_clean_white_visualizations import generate_all_clean_white_visualizations
 
 if __name__ == "__main__":
-    main()
+    generate_all_clean_white_visualizations()

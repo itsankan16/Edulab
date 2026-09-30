@@ -64,15 +64,27 @@ REQUIRED_FILES: list[Path] = [
 ]
 
 REQUIRED_FIGURES: list[str] = [
-    "01_overall_score_bars.png",
-    "02_latency_vs_accuracy.png",
-    "03_subject_heatmap.png",
-    "04_subject_bar_comparison.png",
-    "05_exact_match_rate.png",
-    "06_subject_metric_heatmap.png",   # always generated from subject_leaderboard
-    "07_score_distribution.png",       # requires scored_results.csv
-    "08_latency_distribution.png",     # requires scored_results.csv
-    "09_tokens_vs_latency.png",        # requires scored_results.csv
+    # Qwen 2.5 (3B) [6 figures]
+    "qwen_bars.png",
+    "qwen_radar.png",
+    "qwen_boxplots.png",
+    "qwen_heatmap.png",
+    "qwen_latency.png",
+    "qwen_correlations.png",
+    # Google Gemini [6 figures]
+    "gemini_bars.png",
+    "gemini_radar.png",
+    "gemini_boxplots.png",
+    "gemini_heatmap.png",
+    "gemini_latency.png",
+    "gemini_correlations.png",
+    # Head-to-Head Comparison [6 figures]
+    "comparison_bars.png",
+    "comparison_scorecard.png",
+    "comparison_f1.png",
+    "comparison_latency.png",
+    "comparison_radar.png",
+    "comparison_heatmap.png",
 ]
 
 # ---------------------------------------------------------------------------

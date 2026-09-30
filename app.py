@@ -9,7 +9,7 @@ Features:
     "Qwen 2.5 3B" and "Google Gemini", or a side-by-side comparison view.
   - Live data loading: dynamically switches between results/scored_results.csv (Qwen)
     and results/gemini_scored_results.csv (Gemini).
-  - Visualizations gallery: showcases all 11 comparative figures and scorecards.
+  - Visualizations gallery: showcases all 18 unique figures across Qwen (6), Gemini (6), and Comparison (6).
   - Live model playground: test queries in real-time with latency tracking.
   - Auto-launcher: launches Streamlit automatically when run via `python app.py`.
 
@@ -73,170 +73,250 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# Global CSS — dark premium design
+# Global CSS — white-based warm cream & crimson design (#FFFAF3, #FFF2DB, #FFE5BF, #F62440)
 # ---------------------------------------------------------------------------
 st.markdown(
     """
     <style>
     /* ── Core background ── */
-    [data-testid="stAppViewContainer"] {
-        background: linear-gradient(135deg, #0d1117 0%, #161b2e 100%);
+    [data-testid="stAppViewContainer"], .main {
+        background-color: #FFFAF3 !important;
+    }
+    .main .block-container {
+        padding-top: 1.8rem;
+        padding-bottom: 3rem;
     }
     [data-testid="stSidebar"] {
-        background: #0f1623;
-        border-right: 1px solid #1e2a45;
+        background-color: #FFF2DB !important;
+        border-right: 1.5px solid #FFE5BF !important;
+    }
+    [data-testid="stHeader"] {
+        background-color: rgba(255, 250, 243, 0.95) !important;
     }
 
     /* ── Typography ── */
-    html, body, [class*="css"] {
-        font-family: 'Inter', 'Segoe UI', sans-serif;
-        color: #e2e8f0;
+    html, body, [class*="css"], [data-testid="stMarkdownContainer"] {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        color: #2D1E1E;
     }
-    h1 { color: #60a5fa; font-weight: 800; letter-spacing: -0.5px; }
-    h2 { color: #93c5fd; font-weight: 700; }
-    h3 { color: #bfdbfe; font-weight: 600; }
+    h1 {
+        color: #F62440 !important;
+        font-weight: 800 !important;
+        letter-spacing: -0.5px !important;
+    }
+    h2 {
+        color: #1E1B18 !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.3px !important;
+    }
+    h3 {
+        color: #2D1E1E !important;
+        font-weight: 600 !important;
+    }
+    h4, h5, h6 {
+        color: #3D2B24 !important;
+        font-weight: 600 !important;
+    }
 
     /* ── Metric cards ── */
     [data-testid="metric-container"] {
-        background: linear-gradient(145deg, #1e2d4a, #162040);
-        border: 1px solid #2d4a7a;
-        border-radius: 14px;
-        padding: 18px 20px 14px;
-        box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+        background: #FFFFFF !important;
+        border: 1.5px solid #FFE5BF !important;
+        border-radius: 14px !important;
+        padding: 16px 20px 14px !important;
+        box-shadow: 0 2px 10px rgba(255, 229, 191, 0.5), 0 1px 3px rgba(45, 30, 30, 0.04) !important;
+        transition: all 0.2s ease;
+    }
+    [data-testid="metric-container"]:hover {
+        border-color: #F62440 !important;
+        box-shadow: 0 4px 16px rgba(246, 36, 64, 0.12) !important;
+        transform: translateY(-1px);
     }
     [data-testid="metric-container"] label {
-        color: #7aafff !important;
+        color: #6E5D53 !important;
         font-size: 0.78rem !important;
-        font-weight: 600 !important;
+        font-weight: 700 !important;
         letter-spacing: 0.06em !important;
         text-transform: uppercase;
     }
     [data-testid="metric-container"] [data-testid="stMetricValue"] {
-        color: #e2e8f0 !important;
+        color: #F62440 !important;
         font-size: 1.85rem !important;
         font-weight: 800 !important;
     }
     [data-testid="metric-container"] [data-testid="stMetricDelta"] {
         font-size: 0.78rem !important;
+        color: #2D1E1E !important;
     }
 
-    /* ── Dataframe ── */
+    /* ── Dataframes ── */
     [data-testid="stDataFrame"] {
         border-radius: 12px;
         overflow: hidden;
-        border: 1px solid #1e2a45;
+        border: 1.5px solid #FFE5BF;
+        background: #FFFFFF;
+        box-shadow: 0 2px 8px rgba(255, 229, 191, 0.3);
     }
 
-    /* ── Sidebar nav ── */
+    /* ── Sidebar nav & radio labels ── */
     [data-testid="stSidebar"] .stRadio label {
         font-size: 0.95rem;
-        font-weight: 500;
+        font-weight: 600;
+        color: #2D1E1E !important;
         padding: 6px 0;
+    }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+        color: #2D1E1E;
     }
 
     /* ── Buttons ── */
     .stButton > button {
-        background: linear-gradient(135deg, #2563eb, #1d4ed8);
-        color: white;
-        border: none;
-        border-radius: 10px;
-        padding: 10px 24px;
-        font-weight: 600;
-        font-size: 0.95rem;
-        transition: all 0.2s ease;
-        box-shadow: 0 4px 15px rgba(37,99,235,0.35);
+        background: linear-gradient(135deg, #F62440 0%, #D81A34 100%) !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        border-radius: 10px !important;
+        padding: 10px 24px !important;
+        font-weight: 700 !important;
+        font-size: 0.95rem !important;
+        transition: all 0.2s ease !important;
+        box-shadow: 0 4px 14px rgba(246, 36, 64, 0.32) !important;
     }
     .stButton > button:hover {
-        background: linear-gradient(135deg, #3b82f6, #2563eb);
-        box-shadow: 0 6px 20px rgba(59,130,246,0.5);
+        background: linear-gradient(135deg, #FF3B56 0%, #F62440 100%) !important;
+        box-shadow: 0 6px 20px rgba(246, 36, 64, 0.48) !important;
         transform: translateY(-1px);
+        color: #FFFFFF !important;
+    }
+    .stButton > button:active {
+        transform: translateY(0);
     }
 
     /* ── Select / text inputs ── */
     .stSelectbox > div > div,
     .stTextArea > div > div,
     .stTextInput > div > div {
-        background: #1a2540 !important;
-        border: 1px solid #2d4a7a !important;
+        background: #FFFFFF !important;
+        border: 1.5px solid #FFE5BF !important;
         border-radius: 10px !important;
-        color: #e2e8f0 !important;
+        color: #2D1E1E !important;
+        box-shadow: 0 1px 4px rgba(255, 229, 191, 0.3) !important;
+    }
+    .stSelectbox > div > div:focus-within,
+    .stTextArea > div > div:focus-within,
+    .stTextInput > div > div:focus-within {
+        border-color: #F62440 !important;
+        box-shadow: 0 0 0 3px rgba(246, 36, 64, 0.15) !important;
     }
 
     /* ── Code / response box ── */
     .response-box {
-        background: #111827;
-        border: 1px solid #1e3a5f;
+        background: #FFFFFF;
+        border: 1.5px solid #FFE5BF;
         border-radius: 12px;
         padding: 20px 24px;
         font-size: 0.95rem;
         line-height: 1.7;
-        color: #d1fae5;
+        color: #1E1B18;
         white-space: pre-wrap;
         max-height: 420px;
         overflow-y: auto;
+        box-shadow: 0 2px 10px rgba(255, 229, 191, 0.35);
     }
     .latency-badge {
         display: inline-block;
-        background: linear-gradient(135deg, #065f46, #047857);
-        color: #6ee7b7;
+        background: #FFF2DB;
+        color: #F62440;
         border-radius: 20px;
         padding: 4px 14px;
         font-size: 0.82rem;
         font-weight: 700;
         margin-top: 10px;
-        border: 1px solid #059669;
+        border: 1.5px solid #FFE5BF;
     }
     .error-box {
-        background: #1f0a0a;
-        border: 1px solid #7f1d1d;
+        background: #FFF5F5;
+        border: 1.5px solid #F62440;
         border-radius: 12px;
         padding: 16px 20px;
-        color: #fca5a5;
+        color: #B91C1C;
         font-size: 0.9rem;
     }
 
     /* ── Section divider ── */
     .section-divider {
         border: none;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, #2d4a7a, transparent);
+        height: 1.5px;
+        background: linear-gradient(90deg, transparent, #FFE5BF, transparent);
         margin: 28px 0;
     }
 
     /* ── Page hero ── */
     .page-hero {
-        background: linear-gradient(135deg, #0f2447 0%, #162040 100%);
-        border: 1px solid #1e3a6e;
+        background: linear-gradient(135deg, #FFF2DB 0%, #FFE5BF 100%);
+        border: 1.5px solid #FFE5BF;
         border-radius: 16px;
         padding: 24px 28px;
         margin-bottom: 24px;
+        box-shadow: 0 3px 12px rgba(255, 229, 191, 0.45);
     }
-    .page-hero h1 { margin: 0 0 6px 0; font-size: 1.85rem; }
-    .page-hero p  { color: #7aafff; margin: 0; font-size: 0.95rem; }
+    .page-hero h1 {
+        margin: 0 0 6px 0;
+        font-size: 1.85rem;
+        color: #F62440 !important;
+    }
+    .page-hero p {
+        color: #6E5D53;
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 500;
+    }
 
     /* ── Model badge pill ── */
     .model-pill {
         display: inline-block;
-        padding: 4px 12px;
+        padding: 5px 14px;
         border-radius: 20px;
         font-size: 0.78rem;
-        font-weight: 700;
+        font-weight: 800;
         letter-spacing: 0.05em;
         text-transform: uppercase;
     }
-    .pill-qwen { background: #1e3a6e; color: #60a5fa; border: 1px solid #3b82f6; }
-    .pill-gemini { background: #45220c; color: #fb923c; border: 1px solid #f97316; }
+    .pill-qwen {
+        background: #FFF2DB;
+        color: #2D1E1E;
+        border: 1.5px solid #FFE5BF;
+    }
+    .pill-gemini {
+        background: #FFF2DB;
+        color: #F62440;
+        border: 1.5px solid #FFE5BF;
+    }
+    .pill-compare {
+        background: #FFF2DB;
+        color: #F62440;
+        border: 1.5px solid #F62440;
+    }
 
     /* ── Figure card ── */
     .fig-card {
-        background: #111827;
-        border: 1px solid #1e2a45;
+        background: #FFFFFF;
+        border: 1.5px solid #FFE5BF;
         border-radius: 14px;
         padding: 16px;
-        transition: box-shadow 0.2s;
+        box-shadow: 0 2px 10px rgba(255, 229, 191, 0.4);
+        transition: all 0.2s ease;
     }
     .fig-card:hover {
-        box-shadow: 0 0 0 2px #3b82f6, 0 8px 32px rgba(59,130,246,0.18);
+        border-color: #F62440;
+        box-shadow: 0 6px 24px rgba(246, 36, 64, 0.16);
+        transform: translateY(-2px);
+    }
+
+    /* ── Expander ── */
+    div[data-testid="stExpander"] {
+        background: #FFFFFF;
+        border: 1.5px solid #FFE5BF;
+        border-radius: 12px;
     }
     </style>
     """,
@@ -258,21 +338,34 @@ DATASET_NAME_MAP = {
 }
 SUBJECT_NAME_MAP = {v: k for k, v in DATASET_NAME_MAP.items()}
 DATASET_ORDER = ["SciQ", "OpenBookQA", "ARC-Challenge", "RACE", "SQuAD v1.1"]
-MODELS = ["Qwen 2.5 3B", "Google Gemini", "⚖️ Compare Both Side-by-Side"]
+MODELS = ["Qwen 2.5 3B", "Google Gemini", "⚔️ Head-to-Head Comparison"]
 
 FIGURE_TITLES = {
-    "01_overall_score_bars.png":         "Overall Score Comparison (Multi-Model)",
-    "02_latency_vs_accuracy.png":        "Latency vs. Accuracy",
-    "03_subject_heatmap.png":            "LLM Score Heatmap (Model × Subject)",
-    "04_subject_bar_comparison.png":     "Per-Subject Bar Comparison",
-    "05_exact_match_rate.png":           "Exact Match Rate Ranking",
-    "06_subject_metric_heatmap.png":     "Subject Multi-Metric Heatmap",
-    "07_score_distribution.png":         "Score Distribution per Model",
-    "08_latency_distribution.png":       "Latency Distribution per Model",
-    "09_tokens_vs_latency.png":          "Token Count vs. Latency",
-    "10_qwen_vs_gemini_per_dataset.png": "Qwen vs. Gemini: Per-Dataset Comparison (5 Datasets)",
-    "11_qwen_vs_gemini_scorecard.png":   "Qwen vs. Gemini: Executive Scorecard & Win Matrix",
+    # ── Qwen 2.5 (3B) Individual Visualizations ──
+    "qwen_bars.png": "Qwen 2.5 (3B) — Multi-Metric Performance Across Datasets",
+    "qwen_radar.png": "Qwen 2.5 (3B) — Multi-Metric Radar Profile Across Datasets",
+    "qwen_boxplots.png": "Qwen 2.5 (3B) — Score Distributions by Dataset (Boxplots)",
+    "qwen_heatmap.png": "Qwen 2.5 (3B) — Metric Score Heatmap (Dataset × Metric)",
+    "qwen_latency.png": "Qwen 2.5 (3B) — Generation Latency by Dataset",
+    "qwen_correlations.png": "Qwen 2.5 (3B) — Metric Correlation Analysis (ROUGE-L, BERT-F1, Judge)",
+
+    # ── Google Gemini Individual Visualizations ──
+    "gemini_bars.png": "Google Gemini — Multi-Metric Performance Across Datasets",
+    "gemini_radar.png": "Google Gemini — Multi-Metric Radar Profile Across Datasets",
+    "gemini_boxplots.png": "Google Gemini — Score Distributions by Dataset (Boxplots)",
+    "gemini_heatmap.png": "Google Gemini — Metric Score Heatmap (Dataset × Metric)",
+    "gemini_latency.png": "Google Gemini — Generation Latency by Dataset",
+    "gemini_correlations.png": "Google Gemini — Metric Correlation Analysis (ROUGE-L, Token F1, Char Sim)",
+
+    # ── Head-to-Head Comparison Visualizations ──
+    "comparison_bars.png": "Head-to-Head Comparison — Multi-Metric Horizontal Bars Across 5 Datasets",
+    "comparison_scorecard.png": "Head-to-Head Comparison — Executive Comparative Scorecard & Win Matrix",
+    "comparison_f1.png": "Head-to-Head Comparison — Dataset F1 Performance & Category Winner",
+    "comparison_latency.png": "Head-to-Head Comparison — Generation Latency Dual-Panel Comparison",
+    "comparison_radar.png": "Head-to-Head Comparison — Dual-Model Comparative Radar Footprint",
+    "comparison_heatmap.png": "Head-to-Head Comparison — Side-by-Side Normalized Metric Matrix Heatmap",
 }
+
 
 
 @st.cache_data(ttl=30)
@@ -381,19 +474,19 @@ with st.sidebar:
         <div style='text-align:center; padding: 16px 0 10px;'>
             <span style='font-size:2.4rem;'>🎓</span><br>
             <span style='font-size:1.15rem; font-weight:800;
-                         background: linear-gradient(90deg,#60a5fa,#818cf8);
+                         background: linear-gradient(90deg, #F62440, #D81A34);
                          -webkit-background-clip:text;
                          -webkit-text-fill-color:transparent;'>
                 EduBench-Local
             </span><br>
-            <span style='font-size:0.75rem; color:#4b6a9c;'>
+            <span style='font-size:0.75rem; color:#6E5D53; font-weight:600;'>
                 Multi-Model LLM Benchmark
             </span>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.markdown("<hr style='border-color:#1e2a45; margin:4px 0 14px;'>", unsafe_allow_html=True)
+    st.markdown("<hr style='border:none; border-top:1.5px solid #FFE5BF; margin:4px 0 14px;'>", unsafe_allow_html=True)
 
     # ── Interactive Model Selection ──
     st.markdown("**🤖 Active Evaluation Model**")
@@ -408,13 +501,13 @@ with st.sidebar:
     active_model = st.session_state["active_model"]
 
     if active_model == "Qwen 2.5 3B":
-        st.caption("🔵 **Qwen 2.5 (3B)** · Local Ollama · 750 questions evaluated")
+        st.caption("🔴 **Qwen 2.5 (3B)** · Local Ollama · 750 questions evaluated")
     elif active_model == "Google Gemini":
         st.caption("🟠 **Google Gemini** · Cloud Flash API · 5-question micro-sample")
     else:
-        st.caption("⚖️ **Side-by-Side** · Head-to-head comparison across 5 datasets")
+        st.caption("⚔️ **Head-to-Head** · Comparative benchmark across 5 datasets")
 
-    st.markdown("<hr style='border-color:#1e2a45; margin:14px 0 16px;'>", unsafe_allow_html=True)
+    st.markdown("<hr style='border:none; border-top:1.5px solid #FFE5BF; margin:14px 0 16px;'>", unsafe_allow_html=True)
 
     page = st.radio(
         "Navigate",
@@ -422,11 +515,11 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
-    st.markdown("<hr style='border-color:#1e2a45; margin:16px 0 12px;'>", unsafe_allow_html=True)
+    st.markdown("<hr style='border:none; border-top:1.5px solid #FFE5BF; margin:16px 0 12px;'>", unsafe_allow_html=True)
     st.markdown(
-        "<div style='font-size:0.72rem; color:#3a5278; text-align:center;'>"
+        "<div style='font-size:0.72rem; color:#6E5D53; text-align:center;'>"
         "EduBench-Local Evaluation Suite<br>"
-        f"Data dir: <code style='color:#4b6a9c'>{RESULTS_DIR.name}/</code>"
+        f"Data dir: <code style='color:#F62440; background:#FFF2DB; padding:2px 6px; border-radius:4px; border:1px solid #FFE5BF;'>{RESULTS_DIR.name}/</code>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -438,6 +531,11 @@ with st.sidebar:
 if page == "📊  Leaderboard & Analytics":
     active_model = st.session_state["active_model"]
 
+    pill_cls = (
+        "pill-qwen" if active_model == "Qwen 2.5 3B"
+        else ("pill-gemini" if active_model == "Google Gemini" else "pill-compare")
+    )
+
     st.markdown(
         f"""
         <div class='page-hero'>
@@ -447,7 +545,7 @@ if page == "📊  Leaderboard & Analytics":
                     <p>Evaluating educational QA performance across SciQ, OpenBookQA, ARC-Challenge, RACE, and SQuAD v1.1</p>
                 </div>
                 <div>
-                    <span class='model-pill {"pill-qwen" if active_model == "Qwen 2.5 3B" else ("pill-gemini" if active_model == "Google Gemini" else "pill-qwen")}'>
+                    <span class='model-pill {pill_cls}'>
                         {active_model}
                     </span>
                 </div>
@@ -486,23 +584,26 @@ if page == "📊  Leaderboard & Analytics":
         qwen_row = lb.iloc[0]
         qwen_em = float(qwen_row["exact_match_rate"]) * 100
         qwen_rl = float(qwen_row.get("avg_rouge_l", 0.137))
+        qwen_f1 = float(qwen_row.get("avg_bert_score_f1", 0.863))
         qwen_llm = float(qwen_row.get("avg_llm_score_1_5", 4.113))
+        qwen_lat = float(qwen_row.get("avg_latency_s", 3.69))
         qwen_n = int(qwen_row["n_questions"])
 
-        # ── 1. Top Metric Cards ──
-        st.subheader("🔵 Qwen 2.5 (3B) Performance Spotlight")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("🤖 Model Architecture", "Qwen 2.5 (3B)")
-        c2.metric("✅ Exact Match Rate", f"{qwen_em:.1f}%")
+        # ── 1. Top Metric Cards (Performance Spotlight) ──
+        st.subheader("🔴 Qwen 2.5 (3B) Performance Spotlight")
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("🤖 Architecture", "Qwen 2.5 (3B)")
+        c2.metric("✅ Exact Match", f"{qwen_em:.1f}%")
         c3.metric("📈 Mean ROUGE-L", f"{qwen_rl:.3f}")
-        c4.metric("🎯 Quality Score", f"{qwen_llm:.3f}", delta="LLM Score (1–5)", delta_color="off")
-        c5.metric("📝 Questions Evaluated", f"{qwen_n:,}", delta="150 / dataset", delta_color="off")
+        c4.metric("🎯 BERTScore F1", f"{qwen_f1:.3f}")
+        c5.metric("⭐ Judge Score", f"{qwen_llm:.2f}", delta="1–5 Scale", delta_color="off")
+        c6.metric("⏱️ Mean Latency", f"{qwen_lat:.2f}s", delta=f"{qwen_n:,} Qs", delta_color="off")
 
         st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
 
         # ── 2. Per-Dataset Performance Breakdown ──
         if sub_lb is not None and not sub_lb.empty:
-            st.subheader("Per-Dataset Performance Breakdown")
+            st.subheader("📊 Individual Dataset Metric Breakdown")
             col_l, col_r = st.columns([3, 2], gap="large")
 
             with col_l:
@@ -514,12 +615,12 @@ if page == "📊  Leaderboard & Analytics":
                 disp_sub["Questions (N)"] = disp_sub["n_questions"].astype(int)
                 disp_sub["Exact Match %"] = (disp_sub["exact_match_rate"] * 100).map("{:.2f}%".format)
                 disp_sub["ROUGE-L"] = disp_sub.get("avg_rouge_l", 0).map("{:.4f}".format)
-                disp_sub["Semantic F1"] = disp_sub.get("avg_bert_score_f1", 0).map("{:.4f}".format)
-                disp_sub["Quality Score"] = disp_sub.get("avg_llm_score_1_5", 0).map("{:.4f}".format)
+                disp_sub["BERTScore F1"] = disp_sub.get("avg_bert_score_f1", 0).map("{:.4f}".format)
+                disp_sub["Judge Score (1–5)"] = disp_sub.get("avg_llm_score_1_5", 0).map("{:.4f}".format)
 
-                show_cols = ["Dataset", "subject", "Questions (N)", "Exact Match %", "ROUGE-L", "Semantic F1", "Quality Score"]
+                show_cols = ["Dataset", "Questions (N)", "Exact Match %", "ROUGE-L", "BERTScore F1", "Judge Score (1–5)"]
                 st.dataframe(
-                    disp_sub[show_cols].rename(columns={"subject": "Internal Subject"}),
+                    disp_sub[show_cols],
                     use_container_width=True,
                     hide_index=True,
                 )
@@ -531,8 +632,51 @@ if page == "📊  Leaderboard & Analytics":
                 chart_sub = chart_sub.sort_values("sort_order")
                 chart_df = chart_sub.set_index("Dataset")[["avg_rouge_l", "exact_match_rate"]]
                 chart_df.columns = ["ROUGE-L", "Exact Match Rate"]
-                st.markdown("**ROUGE-L vs. Exact Match by Dataset**")
+                st.markdown("**Dataset Metric Spread**")
                 st.bar_chart(chart_df, height=270)
+
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+
+        # ── 3. Qwen Individual Visualizations (Exactly 6 Files) ──
+        st.subheader("📈 Qwen 2.5 (3B) Individual Visualizations")
+        st.caption("Clean white publication-grade charts evaluating Qwen 2.5 (3B) exclusively across all educational benchmarks")
+
+        f_qwen_bars = FIGURES_DIR / "qwen_bars.png"
+        f_qwen_heat = FIGURES_DIR / "qwen_heatmap.png"
+        f_qwen_radar = FIGURES_DIR / "qwen_radar.png"
+        f_lat_qwen = FIGURES_DIR / "qwen_latency.png"
+        f_qwen_dist = FIGURES_DIR / "qwen_boxplots.png"
+        f_qwen_corr = FIGURES_DIR / "qwen_correlations.png"
+
+        cq1, cq2 = st.columns(2, gap="medium")
+        with cq1:
+            if f_qwen_bars.exists():
+                st.markdown("**Multi-Metric Performance Across Datasets (ROUGE-L, Judge Scores, EM)**")
+                st.image(str(f_qwen_bars), caption="Exact Match %, ROUGE-L Overlap, and Judge Score (1–5) by Dataset", use_container_width=True)
+        with cq2:
+            if f_qwen_heat.exists():
+                st.markdown("**Metric Score Heatmap (Dataset × Metric)**")
+                st.image(str(f_qwen_heat), caption="Normalized score heatmap: ROUGE-L, BERTScore F1, and Judge Quality", use_container_width=True)
+
+        cq3, cq4 = st.columns(2, gap="medium")
+        with cq3:
+            if f_qwen_radar.exists():
+                st.markdown("**Multi-Metric Radar Profile**")
+                st.image(str(f_qwen_radar), caption="Radar footprint across SciQ, OpenBookQA, ARC, RACE, SQuAD", use_container_width=True)
+        with cq4:
+            if f_lat_qwen.exists():
+                st.markdown("**Generation Latency by Dataset**")
+                st.image(str(f_lat_qwen), caption="Average generation latency (seconds) ± Std Dev error bars", use_container_width=True)
+
+        cq5, cq6 = st.columns(2, gap="medium")
+        with cq5:
+            if f_qwen_dist.exists():
+                st.markdown("**Score Distributions by Dataset (Boxplots)**")
+                st.image(str(f_qwen_dist), caption="Boxplot spreads for ROUGE-L, BERTScore F1, and Judge Score (1–5)", use_container_width=True)
+        with cq6:
+            if f_qwen_corr.exists():
+                st.markdown("**Metric Correlation Analysis**")
+                st.image(str(f_qwen_corr), caption="Scatter & linear regressions comparing ROUGE-L, BERT-F1, and Judge Score", use_container_width=True)
 
         st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
 
@@ -609,21 +753,24 @@ if page == "📊  Leaderboard & Analytics":
         gem_em = float(gem_scored["exact_match"].mean()) * 100
         gem_rl = float(gem_scored["rouge_l"].mean())
         gem_f1 = float(gem_scored["token_f1"].mean())
+        gem_sim = float(gem_scored["char_similarity"].mean()) if "char_similarity" in gem_scored.columns else 0.570
+        gem_lat = float(gem_scored["latency_s"].mean()) if "latency_s" in gem_scored.columns else 1.03
 
-        # ── 1. Top Metric Cards ──
+        # ── 1. Top Metric Cards (Performance Spotlight) ──
         st.subheader("🟠 Google Gemini Performance Spotlight")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("🤖 Model Architecture", "Gemini (Flash)")
-        c2.metric("✅ Exact Match Rate", f"{gem_em:.1f}%")
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("🤖 Architecture", "Gemini (Flash)")
+        c2.metric("✅ Exact Match", f"{gem_em:.1f}%")
         c3.metric("📈 Mean ROUGE-L", f"{gem_rl:.3f}")
-        c4.metric("🎯 Quality Score", f"{gem_f1:.3f}", delta="Token F1", delta_color="off")
-        c5.metric("📝 Questions Evaluated", f"{n_gem}", delta="Micro-sample", delta_color="off")
+        c4.metric("🎯 Token F1", f"{gem_f1:.3f}")
+        c5.metric("🔤 Char Similarity", f"{gem_sim:.3f}")
+        c6.metric("⏱️ Mean Latency", f"{gem_lat:.2f}s", delta=f"{n_gem} Qs sample", delta_color="off")
 
         st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
 
         # ── 2. Per-Dataset Performance Breakdown ──
         if gem_lb is not None and not gem_lb.empty:
-            st.subheader("Per-Dataset Performance Breakdown")
+            st.subheader("📊 Individual Dataset Metric Breakdown")
             col_gl, col_gr = st.columns([3, 2], gap="large")
 
             with col_gl:
@@ -634,12 +781,12 @@ if page == "📊  Leaderboard & Analytics":
                 disp_glb["Questions (N)"] = disp_glb["n_questions"].astype(int)
                 disp_glb["Exact Match %"] = (disp_glb["exact_match_rate"] * 100).map("{:.2f}%".format)
                 disp_glb["ROUGE-L"] = disp_glb["avg_rouge_l"].map("{:.4f}".format)
-                disp_glb["Semantic F1"] = disp_glb["avg_token_f1"].map("{:.4f}".format)
-                disp_glb["Quality Score"] = disp_glb["avg_char_similarity"].map("{:.4f}".format)
+                disp_glb["Token F1"] = disp_glb["avg_token_f1"].map("{:.4f}".format)
+                disp_glb["Char Similarity"] = disp_glb["avg_char_similarity"].map("{:.4f}".format)
 
-                show_gcols = ["dataset", "subject", "Questions (N)", "Exact Match %", "ROUGE-L", "Semantic F1", "Quality Score"]
+                show_gcols = ["dataset", "Questions (N)", "Exact Match %", "ROUGE-L", "Token F1", "Char Similarity"]
                 st.dataframe(
-                    disp_glb[show_gcols].rename(columns={"dataset": "Dataset", "subject": "Internal Subject"}),
+                    disp_glb[show_gcols].rename(columns={"dataset": "Dataset"}),
                     use_container_width=True,
                     hide_index=True,
                 )
@@ -649,9 +796,52 @@ if page == "📊  Leaderboard & Analytics":
                 chart_glb["sort_order"] = chart_glb["dataset"].map(lambda x: DATASET_ORDER.index(x) if x in DATASET_ORDER else 99)
                 chart_glb = chart_glb.sort_values("sort_order")
                 chart_gdf = chart_glb.set_index("dataset")[["avg_rouge_l", "exact_match_rate"]]
-                chart_gdf.columns = ["ROUGE-L", "Exact Match Rate"]
-                st.markdown("**ROUGE-L vs. Exact Match by Dataset**")
+                chart_gdf.columns = ["ROUGE-L Overlap", "Exact Match Rate"]
+                st.markdown("**Dataset Metric Spread**")
                 st.bar_chart(chart_gdf, height=270)
+
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+
+        # ── 3. Gemini Individual Evaluation Charts (Exactly 6 Files) ──
+        st.subheader("📈 Google Gemini Individual Visualizations")
+        st.caption("Clean white publication-grade charts evaluating Google Gemini Flash API across all educational benchmarks")
+
+        f_gem_bars = FIGURES_DIR / "gemini_bars.png"
+        f_gem_heat = FIGURES_DIR / "gemini_heatmap.png"
+        f_gem_radar = FIGURES_DIR / "gemini_radar.png"
+        f_lat_gemini = FIGURES_DIR / "gemini_latency.png"
+        f_gem_dist = FIGURES_DIR / "gemini_boxplots.png"
+        f_gem_corr = FIGURES_DIR / "gemini_correlations.png"
+
+        cg1, cg2 = st.columns(2, gap="medium")
+        with cg1:
+            if f_gem_bars.exists():
+                st.markdown("**Multi-Metric Performance Across Datasets (Exact Match, Token F1, ROUGE-L)**")
+                st.image(str(f_gem_bars), caption="Horizontal bar charts showing Gemini accuracy per dataset", use_container_width=True)
+        with cg2:
+            if f_gem_heat.exists():
+                st.markdown("**Metric Score Heatmap (Dataset × Metric)**")
+                st.image(str(f_gem_heat), caption="Normalized score heatmap: ROUGE-L, Token F1, Char Similarity, EM", use_container_width=True)
+
+        cg3, cg4 = st.columns(2, gap="medium")
+        with cg3:
+            if f_gem_radar.exists():
+                st.markdown("**Multi-Metric Radar Profile**")
+                st.image(str(f_gem_radar), caption="Radar footprint across SciQ, OpenBookQA, ARC, RACE, SQuAD", use_container_width=True)
+        with cg4:
+            if f_lat_gemini.exists():
+                st.markdown("**Generation Latency by Dataset**")
+                st.image(str(f_lat_gemini), caption="Average API latency (seconds) ± Std Dev error bars", use_container_width=True)
+
+        cg5, cg6 = st.columns(2, gap="medium")
+        with cg5:
+            if f_gem_dist.exists():
+                st.markdown("**Score Distributions by Dataset (Boxplots)**")
+                st.image(str(f_gem_dist), caption="Boxplot & stripplot spreads for ROUGE-L, Token F1, and Character Similarity", use_container_width=True)
+        with cg6:
+            if f_gem_corr.exists():
+                st.markdown("**Metric Correlation Analysis**")
+                st.image(str(f_gem_corr), caption="Scatter & linear regressions between ROUGE-L, Token F1, and Character Similarity", use_container_width=True)
 
         st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
 
@@ -711,16 +901,19 @@ if page == "📊  Leaderboard & Analytics":
                 m_c4.metric("Char Similarity", f"{row.get('char_similarity', 0):.3f}")
 
     # -----------------------------------------------------------------------
-    # VIEW 3: Side-by-Side Comparison
+    # -----------------------------------------------------------------------
+    # VIEW 3: Dedicated Head-to-Head Comparison (All Comparative/Versus Visualizations)
     # -----------------------------------------------------------------------
     else:
         lb = load_leaderboard()
         sub_lb = load_subject_leaderboard()
         gem_scored = load_gemini_scored()
+        qwen_scored = load_qwen_scored()
 
-        st.subheader("⚖️ Head-to-Head Comparative Overview")
+        st.subheader("⚔️ Head-to-Head Comparison: Qwen 2.5 (3B) vs. Google Gemini")
+        st.caption("Direct comparative benchmark contrasting local on-device inference against cloud frontier API")
 
-        # Top comparative cards
+        # Top comparative spotlight cards
         qwen_em = float(lb["exact_match_rate"].iloc[0])*100 if lb is not None and not lb.empty else 2.9
         qwen_rl = float(lb["avg_rouge_l"].iloc[0]) if lb is not None and not lb.empty else 0.137
         gem_em  = float(gem_scored["exact_match"].mean())*100 if gem_scored is not None else 40.0
@@ -735,7 +928,7 @@ if page == "📊  Leaderboard & Analytics":
         st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
 
         # ── 5 Datasets Comparison Table ──
-        st.subheader("Dataset-by-Dataset Benchmark Performance Matrix")
+        st.subheader("📊 Dataset-by-Dataset Benchmark Performance Matrix")
 
         comp_rows = []
         for ds_name in DATASET_ORDER:
@@ -754,30 +947,107 @@ if page == "📊  Leaderboard & Analytics":
             else:
                 g_em, g_rl = 0.0, 0.0
 
-            winner = "Gemini" if g_em > q_em or g_rl > q_rl else ("Qwen" if q_em > g_em or q_rl > g_rl else "Parity")
+            winner = "Gemini ★" if g_em > q_em or g_rl > q_rl else ("Qwen ★" if q_em > g_em or q_rl > g_rl else "Parity")
 
             comp_rows.append({
                 "Dataset": ds_name,
-                "Internal Subject": s,
                 "Qwen EM %": f"{q_em:.1f}%",
                 "Gemini EM %": f"{g_em:.1f}%",
                 "Qwen ROUGE-L": f"{q_rl:.3f}",
                 "Gemini ROUGE-L": f"{g_rl:.3f}",
-                "Winner": f"★ {winner}"
+                "Category Winner": winner
             })
 
         st.dataframe(pd.DataFrame(comp_rows), use_container_width=True, hide_index=True)
 
-        # Show embedded comparison figures if present
-        f10 = FIGURES_DIR / "10_qwen_vs_gemini_per_dataset.png"
-        f11 = FIGURES_DIR / "11_qwen_vs_gemini_scorecard.png"
-        if f10.exists() or f11.exists():
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+
+        # ── Dedicated Suite of Comparative Visualizations (Exactly 6 Files) ──
+        st.subheader("⚔️ Head-to-Head Comparative Visualizations Suite")
+        st.caption("Publication-grade charts directly contrasting Qwen 2.5 (3B) and Google Gemini")
+
+        f_exec = FIGURES_DIR / "comparison_scorecard.png"
+        f_comp_bars = FIGURES_DIR / "comparison_bars.png"
+        f_comp_heat = FIGURES_DIR / "comparison_heatmap.png"
+        f_comp_f1 = FIGURES_DIR / "comparison_f1.png"
+        f_comp_radar = FIGURES_DIR / "comparison_radar.png"
+        f_lat_comp = FIGURES_DIR / "comparison_latency.png"
+
+        # 1. Executive Scorecard & Win Matrix
+        if f_exec.exists():
+            st.markdown("#### 🏆 Executive Comparative Scorecard & Win Matrix")
+            st.image(str(f_exec), caption="Figure 1: Overall KPIs and Per-Dataset Head-to-Head Winner Breakdown", use_container_width=True)
             st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
-            st.subheader("Publication Comparative Visualizations")
-            if f10.exists():
-                st.image(str(f10), caption="Figure 10: Head-to-Head Comparison Across 5 Datasets", use_container_width=True)
-            if f11.exists():
-                st.image(str(f11), caption="Figure 11: Executive Scorecard & Win Matrix", use_container_width=True)
+
+        # 2. Side-by-side: Multi-Metric Comparison Bars & Comparative Heatmap
+        c_v1, c_v2 = st.columns(2, gap="medium")
+        with c_v1:
+            if f_comp_bars.exists():
+                st.markdown("#### 📊 Comparative Horizontal Bars Across 5 Datasets")
+                st.image(str(f_comp_bars), caption="Figure 2: Head-to-Head Multi-Metric Comparison (Exact Match, ROUGE-L, F1)", use_container_width=True)
+        with c_v2:
+            if f_comp_heat.exists():
+                st.markdown("#### 🗺️ Head-to-Head Score Heatmap")
+                st.image(str(f_comp_heat), caption="Figure 3: Side-by-Side Normalized Metric Matrix (Qwen vs. Gemini)", use_container_width=True)
+
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+
+        # 3. Side-by-side: Dataset F1 Comparison & Comparative Radar Footprint
+        c_v3, c_v4 = st.columns(2, gap="medium")
+        with c_v3:
+            if f_comp_f1.exists():
+                st.markdown("#### 🎯 Dataset F1 Performance & Category Winner")
+                st.image(str(f_comp_f1), caption="Figure 4: Head-to-Head Dataset F1 Comparison with Win Badges", use_container_width=True)
+        with c_v4:
+            if f_comp_radar.exists():
+                st.markdown("#### 🕸️ Dual-Model Comparative Radar Footprint")
+                st.image(str(f_comp_radar), caption="Figure 5: Comparative Radar Footprint across SciQ, OpenBookQA, ARC, RACE, SQuAD", use_container_width=True)
+
+        st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+
+        # 4. Dual-Panel Generation Latency Comparison
+        if f_lat_comp.exists():
+            st.markdown("#### ⚡ Generation Latency: Head-to-Head Dual Panel Comparison")
+            st.image(str(f_lat_comp), caption="Figure 6: Average Generation Latency (seconds) — Local Ollama vs. Cloud Flash API", use_container_width=True)
+            st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
+
+        # ── 5. Question-by-Question Head-to-Head Answer Explorer ──
+        if gem_scored is not None and not gem_scored.empty and qwen_scored is not None:
+            st.subheader("🔍 Overlapping Sample Questions: Side-by-Side Answer Comparison")
+            st.caption("Inspect identical test questions evaluated by both Qwen 2.5 (3B) and Google Gemini")
+
+            for _, g_row in gem_scored.iterrows():
+                q_id = g_row["id"]
+                ds_label = g_row.get("source_dataset") or g_row.get("dataset", "Dataset")
+                q_match_rows = qwen_scored[qwen_scored["id"] == q_id]
+                q_row = q_match_rows.iloc[0] if not q_match_rows.empty else None
+
+                em_g = "✅ Exact Match" if g_row.get("exact_match") == 1 else "❌ Mismatch"
+                em_q = ("✅ Exact Match" if q_row.get("exact_match") == 1 else "❌ Mismatch") if q_row is not None else "—"
+
+                with st.expander(f"{ds_label} — Question ID: {q_id} [Gemini: {em_g} | Qwen: {em_q}]", expanded=False):
+                    st.markdown(f"**Question**: {g_row['question']}")
+                    if g_row.get("context") and pd.notna(g_row["context"]):
+                        st.caption(f"**Context**: {str(g_row['context'])[:250]}...")
+                    st.markdown(f"**Ground Truth Reference**: `{g_row['reference_answer']}`")
+
+                    col_ans1, col_ans2 = st.columns(2, gap="medium")
+                    with col_ans1:
+                        st.markdown("**🔴 Qwen 2.5 (3B) Answer**")
+                        if q_row is not None:
+                            st.info(f"\"{q_row['student_answer']}\"")
+                            qm1, qm2 = st.columns(2)
+                            qm1.metric("Exact Match", int(q_row.get("exact_match", 0)))
+                            qm2.metric("ROUGE-L", f"{q_row.get('rouge_l', 0):.3f}")
+                        else:
+                            st.write("No matching answer in Qwen subset.")
+
+                    with col_ans2:
+                        st.markdown("**🟠 Google Gemini Answer**")
+                        st.success(f"\"{g_row['gemini_answer']}\"")
+                        gm1, gm2 = st.columns(2)
+                        gm1.metric("Exact Match", int(g_row.get("exact_match", 0)))
+                        gm2.metric("ROUGE-L", f"{g_row.get('rouge_l', 0):.3f}")
 
 
 # ===========================================================================
@@ -801,10 +1071,52 @@ elif page == "🖼️  Visualizations":
         st.info("No figures found in `figures/`. Run `python generate_visualizations.py` to produce them.", icon="ℹ️")
         st.stop()
 
+    active_model = st.session_state.get("active_model", "Qwen 2.5 3B")
+
+    # Strict canonical filename groups (6 Qwen, 6 Gemini, 6 Comparison)
+    qwen_expected = ["qwen_bars.png", "qwen_radar.png", "qwen_boxplots.png", "qwen_heatmap.png", "qwen_latency.png", "qwen_correlations.png"]
+    gemini_expected = ["gemini_bars.png", "gemini_radar.png", "gemini_boxplots.png", "gemini_heatmap.png", "gemini_latency.png", "gemini_correlations.png"]
+    comparison_expected = ["comparison_bars.png", "comparison_scorecard.png", "comparison_f1.png", "comparison_latency.png", "comparison_radar.png", "comparison_heatmap.png"]
+
+    cat_options = [
+        "🔴 Qwen 2.5 (3B) Individual (6 Files)",
+        "🟠 Google Gemini Individual (6 Files)",
+        "⚔️ Head-to-Head Comparative (6 Files)",
+        "🌐 All 18 Visualizations",
+    ]
+
+    # Map current active model to the default filter option
+    if active_model == "Qwen 2.5 3B":
+        default_idx = 0
+    elif active_model == "Google Gemini":
+        default_idx = 1
+    elif active_model == "⚔️ Head-to-Head Comparison":
+        default_idx = 2
+    else:
+        default_idx = 0
+
     # Filter controls
     f_c1, f_c2 = st.columns([2, 3])
     with f_c1:
         layout_mode = st.radio("Layout Mode", ["2-Column Grid", "Full Width"], horizontal=True)
+    with f_c2:
+        cat_filter = st.selectbox(
+            "Filter Category",
+            cat_options,
+            index=default_idx,
+            key=f"cat_filter_{active_model}",
+        )
+
+    # Strictly filter files based on the selected category
+    if "Qwen" in cat_filter:
+        fig_files = [FIGURES_DIR / name for name in qwen_expected if (FIGURES_DIR / name).exists()]
+    elif "Gemini" in cat_filter:
+        fig_files = [FIGURES_DIR / name for name in gemini_expected if (FIGURES_DIR / name).exists()]
+    elif "Comparative" in cat_filter or "Comparison" in cat_filter:
+        fig_files = [FIGURES_DIR / name for name in comparison_expected if (FIGURES_DIR / name).exists()]
+    else:
+        all_expected = qwen_expected + gemini_expected + comparison_expected
+        fig_files = [FIGURES_DIR / name for name in all_expected if (FIGURES_DIR / name).exists()]
 
     st.caption(f"Displaying **{len(fig_files)}** publication-grade charts")
     st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
